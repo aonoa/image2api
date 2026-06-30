@@ -30,6 +30,7 @@ async function load() {
     offset: String((page.value - 1) * pageSize),
     status: 'success',
     has_file: '1',
+    source: 'user', // 创作记录 = 画图台作品;排除 API(v1,无存储文件)+ 测试
   })
   if (kindFilter.value) qs.set('kind', kindFilter.value)
   const r = await api('/logs?' + qs.toString())
@@ -160,8 +161,9 @@ onUnmounted(() => {
                  class="absolute inset-0 w-full h-full object-cover"
                  @mouseenter="$event.target.play && $event.target.play()"
                  @mouseleave="$event.target.pause && $event.target.pause()" />
-          <img v-else :src="generatedUrl(e.file)" loading="lazy"
-               class="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+          <!-- background-image (not <img>) so Edge shows no 视觉搜索 overlay icon. -->
+          <div v-else :style="{ backgroundImage: `url(${generatedUrl(e.file)})` }"
+               class="absolute inset-0 w-full h-full bg-cover bg-center transition-transform duration-300 group-hover:scale-105"></div>
           <div class="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/85 via-black/40 to-transparent pointer-events-none"></div>
         </template>
         <!-- pending / failed placeholders -->

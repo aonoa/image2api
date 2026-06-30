@@ -14,12 +14,13 @@ const tabs = [
   { label: '账号管理', to: '/admin/accounts', icon: 'plug' },
   { label: '用户管理', to: '/admin/users',    icon: 'accounts' },
   { label: '并发分组', to: '/admin/concurrency', icon: 'shield' },
-  { label: '兑换码',   to: '/admin/cdks',     icon: 'spark' },
+  { label: '订单管理', to: '/admin/orders',   icon: 'receipt' },
+  { label: '兑换码管理', to: '/admin/cdks',   icon: 'spark' },
   { label: '邀请日志', to: '/admin/invites',  icon: 'accounts' },
   { label: '图片管理', to: '/admin/images',   icon: 'files' },
   { label: '首页内容', to: '/admin/showcase', icon: 'spark' },
-  { label: '日志',    to: '/admin/logs',     icon: 'log' },
-  { label: '配置',    to: '/admin/config',   icon: 'config' },
+  { label: '日志管理', to: '/admin/logs',     icon: 'log' },
+  { label: '系统配置', to: '/admin/config',   icon: 'config' },
 ]
 
 const currentLabel = computed(() => route.meta?.label || '')

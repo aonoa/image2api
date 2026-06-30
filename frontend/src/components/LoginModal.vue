@@ -347,12 +347,15 @@ html.dark .fld:-webkit-autofill:focus {
   min-width: 5.5rem; /* keep width stable between text / spinner */
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 0.75rem; white-space: nowrap;
-  color: rgb(196 181 253 / 0.95);
-  background: rgb(167 139 250 / 0.1); border: 1px solid rgb(167 139 250 / 0.3);
+  color: rgb(124 58 237); /* violet-600 — readable on the light card */
+  background: rgb(167 139 250 / 0.12); border: 1px solid rgb(167 139 250 / 0.4);
   transition: background 0.15s, opacity 0.15s;
 }
+html.dark .code-btn { color: rgb(196 181 253 / 0.95); background: rgb(167 139 250 / 0.1); border-color: rgb(167 139 250 / 0.3); }
 .code-btn:hover:not(:disabled) { background: rgb(167 139 250 / 0.2); }
-.code-btn:disabled { opacity: 0.45; cursor: not-allowed; color: rgb(255 255 255 / 0.5); border-color: rgb(255 255 255 / 0.12); }
+/* Disabled (sending / countdown): just dim — keep the theme text color so it
+   never washes out to invisible white on the light card. */
+.code-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .code-spin { width: 1.05rem; height: 1.05rem; animation: code-spin 0.7s linear infinite; }
 @keyframes code-spin { to { transform: rotate(360deg); } }
 

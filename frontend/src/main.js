@@ -13,6 +13,8 @@ import PlaygroundView from './views/PlaygroundView.vue'
 import UserLogsView from './views/UserLogsView.vue'
 import UserLogsTableView from './views/UserLogsTableView.vue'
 import SettingsView from './views/SettingsView.vue'
+import OrdersView from './views/OrdersView.vue'
+import AdminOrdersView from './views/AdminOrdersView.vue'
 import InviteView from './views/InviteView.vue'
 import DocsView from './views/DocsView.vue'
 import AboutView from './views/AboutView.vue'
@@ -40,6 +42,7 @@ const routes = [
       { path: 'invite', component: InviteView, meta: { label: '邀请' } },
       { path: 'docs', component: DocsView, meta: { label: '文档' } },
       { path: 'about', component: AboutView, meta: { label: '关于' } },
+      { path: 'orders', component: OrdersView, meta: { label: '订单' } },
       { path: 'settings', component: SettingsView, meta: { label: '设置' } },
     ],
   },
@@ -53,12 +56,13 @@ const routes = [
       { path: 'accounts', component: AccountsView, meta: { label: '账号管理' } },
       { path: 'users',    component: UsersView,    meta: { label: '用户管理' } },
       { path: 'concurrency', component: ConcurrencyView, meta: { label: '并发分组' } },
-      { path: 'cdks',     component: CdksView,     meta: { label: '兑换码' } },
+      { path: 'orders', component: AdminOrdersView, meta: { label: '订单管理' } },
+      { path: 'cdks',     component: CdksView,     meta: { label: '兑换码管理' } },
       { path: 'invites',  component: InvitesAdminView, meta: { label: '邀请日志' } },
       { path: 'images',   component: ImagesView,   meta: { label: '图片管理' } },
       { path: 'showcase', component: ShowcaseView, meta: { label: '首页内容' } },
-      { path: 'logs',     component: LogsView,     meta: { label: '日志' } },
-      { path: 'config',   component: ConfigView,   meta: { label: '配置' } },
+      { path: 'logs',     component: LogsView,     meta: { label: '日志管理' } },
+      { path: 'config',   component: ConfigView,   meta: { label: '系统配置' } },
     ],
   },
   // legacy redirects
@@ -83,7 +87,7 @@ const router = createRouter({
 
 // Pages that require a login. The home page (/) stays public; everything a
 // signed-in user touches (画图/记录/设置) and the whole admin area is gated.
-const PROTECTED = ['/user', '/logs', '/invite', '/settings']
+const PROTECTED = ['/user', '/logs', '/invite', '/settings', '/orders']
 function isProtected(path) {
   return path.startsWith('/admin') || PROTECTED.includes(path)
 }
@@ -119,3 +123,25 @@ router.afterEach(applyTitle)
 loadSite().then(() => applyTitle(router.currentRoute.value))
 
 createApp(App).use(router).mount('#app')
+
+// Globally strip the browser's video extras (画中画/PiP、下载、投屏、播放速率/增强菜单)
+// from EVERY <video> — applied to existing nodes + anything Vue renders later.
+// (Edge's image "视觉搜索" is handled by rendering thumbnails as CSS background
+//  images instead of <img>, since there's no attribute to disable it.)
+function hardenVideo(v) {
+  try {
+    v.disablePictureInPicture = true
+    v.disableRemotePlayback = true
+    v.setAttribute('controlslist', 'nodownload noremoteplayback noplaybackrate')
+  } catch { /* ignore */ }
+}
+new MutationObserver((muts) => {
+  for (const m of muts) {
+    for (const n of m.addedNodes) {
+      if (n.nodeType !== 1) continue
+      if (n.tagName === 'VIDEO') hardenVideo(n)
+      else n.querySelectorAll && n.querySelectorAll('video').forEach(hardenVideo)
+    }
+  }
+}).observe(document.documentElement, { childList: true, subtree: true })
+document.querySelectorAll('video').forEach(hardenVideo)

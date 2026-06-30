@@ -35,6 +35,11 @@ func seedDefaults(ctx context.Context, db *gorm.DB) error {
 		{Key: "credits.invite_enabled", Value: "true"},
 		{Key: "credits.invite_reward", Value: "3"},
 		{Key: "credits.cdk_redeem_enabled", Value: "true"},
+		{Key: "pay.enabled", Value: "false"},
+		{Key: "pay.api_base", Value: "https://pay.v8jisu.cn/api/pay"},
+		{Key: "pay.methods", Value: "wxpay,alipay"},
+		{Key: "pay.min_amount", Value: "1"},
+		{Key: "pay.points_ratio", Value: "100"},
 		{Key: "logs.retention_days", Value: "30"},
 		{Key: "media.retention_days", Value: "30"},
 	}

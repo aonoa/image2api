@@ -272,6 +272,7 @@ async function quickCredits(u, delta) {
           <col class="w-20" />     <!-- role -->
           <col class="w-16" />     <!-- status switch -->
           <col class="w-24" />     <!-- credits -->
+          <col class="w-24" />     <!-- recharge total -->
           <col class="w-20" />     <!-- generation count -->
           <col class="w-28" />     <!-- registered -->
           <col class="w-28" />     <!-- last login -->
@@ -291,6 +292,7 @@ async function quickCredits(u, delta) {
             <th class="text-left px-3 py-3 font-medium">角色</th>
             <th class="text-left px-3 py-3 font-medium">状态</th>
             <th class="text-right px-3 py-3 font-medium">积分</th>
+            <th class="text-right px-3 py-3 font-medium">累计充值</th>
             <th class="text-right px-3 py-3 font-medium">生图次数</th>
             <th class="text-left px-3 py-3 font-medium">注册时间</th>
             <th class="text-left px-3 py-3 font-medium">最近登录</th>
@@ -339,6 +341,10 @@ async function quickCredits(u, delta) {
             </td>
             <td class="px-3 py-3.5 align-middle text-right tabular-nums text-white/85 whitespace-nowrap">
               {{ points(u.credits).toLocaleString('en-US') }}
+            </td>
+            <td class="px-3 py-3.5 align-middle text-right tabular-nums whitespace-nowrap"
+                :class="u.recharge_total > 0 ? 'text-emerald-300' : 'text-white/25'">
+              ¥{{ (u.recharge_total || 0).toLocaleString('en-US') }}
             </td>
             <td class="px-3 py-3.5 align-middle text-right tabular-nums whitespace-nowrap"
                 :class="u.generation_count > 0 ? 'text-white/85' : 'text-white/25'">

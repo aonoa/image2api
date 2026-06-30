@@ -259,12 +259,10 @@ func videoSizeToInternal(size string) (ratio, resolution string) {
 	if w == 0 || h == 0 {
 		return "16:9", "720p"
 	}
-	long := w
-	if h > long {
-		long = h
-	}
+	// The "p" resolution is the SHORT edge (720p = 1280×720, 1080p = 1920×1080),
+	// so a standard 1280×720 must read as 720p — not 1080p off the long edge.
 	resolution = "720p"
-	if long >= 1080 {
+	if min(w, h) >= 1080 {
 		resolution = "1080p"
 	}
 	return guessRatioWH(w, h), resolution

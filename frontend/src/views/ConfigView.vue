@@ -120,6 +120,42 @@ const smtpBusy = ref(false); const smtpSaved = ref(false)
 const credits = reactive({ checkin_enabled: true, checkin_reward: 3, invite_enabled: true, invite_reward: 3, cdk_redeem_enabled: true })
 const credBusy = ref(false); const credSaved = ref(false)
 
+// ---- announcement (公告, markdown; re-pops for users who haven't seen edits) ----
+const ann = reactive({ content: '' })
+const annBusy = ref(false); const annSaved = ref(false)
+async function loadAnnouncement() {
+  const r = await api('/settings/announcement')
+  if (r.ok && r.data) ann.content = r.data.content || ''
+}
+async function saveAnnouncement() {
+  annBusy.value = true; annSaved.value = false
+  const r = await api('/settings/announcement', jsonBody('PUT', { content: ann.content }))
+  annBusy.value = false
+  if (r.ok) { annSaved.value = true; setTimeout(() => (annSaved.value = false), 2000) }
+}
+
+// ---- payment (易支付 充值) ----
+const pay = reactive({ enabled: false, pid: '', key: '', api_base: '', methods: ['wxpay', 'alipay'], min_amount: 1, points_ratio: 100 })
+const payBusy = ref(false); const paySaved = ref(false); const payErr = ref('')
+const PAY_METHODS = [{ v: 'wxpay', label: '微信' }, { v: 'alipay', label: '支付宝' }]
+async function loadPay() {
+  const r = await api('/settings/pay')
+  if (r.ok && r.data) Object.assign(pay, r.data, { methods: r.data.methods || [] })
+}
+function togglePayMethod(m) {
+  const i = pay.methods.indexOf(m)
+  if (i >= 0) pay.methods.splice(i, 1); else pay.methods.push(m)
+}
+async function savePay() {
+  payBusy.value = true; paySaved.value = false; payErr.value = ''
+  const r = await api('/settings/pay', jsonBody('PUT', {
+    ...pay, min_amount: Number(pay.min_amount) || 0, points_ratio: Number(pay.points_ratio) || 100,
+  }))
+  payBusy.value = false
+  if (r.ok) { paySaved.value = true; setTimeout(() => (paySaved.value = false), 2000) }
+  else payErr.value = r.data?.detail || '保存失败'
+}
+
 // ---- proxy (carried when calling upstream during generation) ----
 const proxy = reactive({ proxy: '' })
 const proxyBusy = ref(false); const proxySaved = ref(false)
@@ -233,7 +269,7 @@ async function saveCredits() {
   if (r.ok) { credSaved.value = true; setTimeout(() => (credSaved.value = false), 2000) }
 }
 
-onMounted(() => { loadSite(); loadReg(); loadSmtp(); loadCredits(); loadProxy(); loadLogs(); loadMedia() })
+onMounted(() => { loadSite(); loadReg(); loadSmtp(); loadCredits(); loadAnnouncement(); loadPay(); loadProxy(); loadLogs(); loadMedia() })
 </script>
 
 <template>
@@ -424,6 +460,64 @@ onMounted(() => { loadSite(); loadReg(); loadSmtp(); loadCredits(); loadProxy();
         </label>
       </div>
       <div class="mt-4"><button @click="saveCredits" :disabled="credBusy" class="btn-primary">{{ credBusy ? '保存中…' : '保存设置' }}</button></div>
+    </div>
+
+    <!-- announcement (公告) -->
+    <div class="card p-5">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="text-sm font-semibold">公告</h2>
+        <span v-if="annSaved" class="text-xs text-emerald-500">已保存</span>
+      </div>
+      <p class="text-xs text-slate-400 mb-3">支持 Markdown。登录用户会在首次访问时弹出;<strong class="text-slate-500">更新内容后</strong>,所有没看过新版本的用户会重新弹出。留空则不显示。</p>
+      <textarea v-model="ann.content" rows="8" placeholder="# 标题&#10;&#10;支持 **加粗**、列表、[链接](https://...)、`代码` 等 Markdown 语法。"
+                class="field font-mono text-xs leading-relaxed" style="resize:vertical"></textarea>
+      <div class="mt-4"><button @click="saveAnnouncement" :disabled="annBusy" class="btn-primary">{{ annBusy ? '保存中…' : '保存设置' }}</button></div>
+    </div>
+
+    <!-- payment (易支付充值) -->
+    <div class="card p-5">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="text-sm font-semibold">充值 (易支付)</h2>
+        <span v-if="paySaved" class="text-xs text-emerald-500">已保存</span>
+      </div>
+      <p class="text-xs text-slate-400 mb-3">对接易支付。关闭后用户看不到充值入口。商户ID、密钥、支付地址不能为空。</p>
+      <div class="space-y-3">
+        <label class="row">
+          <span><span class="lbl">开启充值</span><span class="hint">关闭后前台不显示充值入口,且无法下单。</span></span>
+          <input type="checkbox" v-model="pay.enabled" class="sw" />
+        </label>
+        <label class="row">
+          <span><span class="lbl">支付地址</span><span class="hint">易支付 API 根地址,自动拼 /mapi。</span></span>
+          <input v-model="pay.api_base" placeholder="https://pay.v8jisu.cn/api/pay" class="field !w-64" />
+        </label>
+        <label class="row">
+          <span><span class="lbl">商户ID (PID)</span></span>
+          <input v-model="pay.pid" class="field !w-64" />
+        </label>
+        <label class="row">
+          <span><span class="lbl">商户密钥</span></span>
+          <input v-model="pay.key" type="password" class="field !w-64" />
+        </label>
+        <div class="row">
+          <span><span class="lbl">支付方式</span><span class="hint">勾选哪些,前台就只显示哪些。</span></span>
+          <div class="flex gap-3">
+            <label v-for="m in PAY_METHODS" :key="m.v" class="inline-flex items-center gap-1.5 text-sm cursor-pointer">
+              <input type="checkbox" :checked="pay.methods.includes(m.v)" @change="togglePayMethod(m.v)" />
+              {{ m.label }}
+            </label>
+          </div>
+        </div>
+        <label class="row">
+          <span><span class="lbl">最低充值金额 (元)</span></span>
+          <input type="number" min="0" step="0.01" v-model.number="pay.min_amount" class="num" />
+        </label>
+        <label class="row">
+          <span><span class="lbl">积分充值比例</span><span class="hint">1 元 = 多少积分。例如 100 → 充 10 元到账 1000 积分。</span></span>
+          <input type="number" min="1" v-model.number="pay.points_ratio" class="num" />
+        </label>
+      </div>
+      <p v-if="payErr" class="text-xs text-rose-500 mt-3">{{ payErr }}</p>
+      <div class="mt-4"><button @click="savePay" :disabled="payBusy" class="btn-primary">{{ payBusy ? '保存中…' : '保存设置' }}</button></div>
     </div>
 
     <!-- logs retention -->

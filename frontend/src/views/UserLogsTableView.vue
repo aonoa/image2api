@@ -209,7 +209,9 @@ const params = (e) => {
         <tbody>
           <tr v-for="e in displayed" :key="e.id" class="log-row">
             <td class="px-3 py-3 align-middle text-center">
-              <button v-if="e.status === 'success' && e.file" @click="lightbox = e"
+              <!-- API(v1) videos are no-store: file is an external provider URL
+                   (not a RustFS path), so it can't be previewed in-browser — show —. -->
+              <button v-if="e.status === 'success' && e.file && !e.file.startsWith('http')" @click="lightbox = e"
                       class="block w-11 h-11 mx-auto rounded-lg overflow-hidden ring-1 ring-slate-200 hover:ring-fuchsia-300 transition-all">
                 <img v-if="e.kind !== 'video'" :src="generatedUrl(e.file)" loading="lazy" class="w-full h-full object-cover" />
                 <video v-else :src="generatedUrl(e.file)" muted preload="metadata" class="w-full h-full object-cover" />

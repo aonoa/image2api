@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Edge: suppress the hover "visual search / 视觉搜索" overlay icon on images and
+   videos (legacy-Edge -ms-touch-action trick). Doesn't affect clicks. */
+img,
+video {
+  -ms-touch-action: none;
+}
+
 :root {
   font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   --tw-ring-color: rgb(15 23 42 / 0.08);

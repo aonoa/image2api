@@ -16,6 +16,8 @@ type User struct {
 	Credits          float64 `gorm:"not null;default:0"`
 	Notes            string  `gorm:"type:text"`
 	ConcurrencyGroupID string `gorm:"size:32;index"`
+	AnnouncementSeen   string `gorm:"size:32"` // version hash of the last announcement this user dismissed
+	RechargeTotal      float64 `gorm:"not null;default:0"` // 累计充值金额(元)
 	InviteCode       string  `gorm:"size:32;uniqueIndex"`
 	InvitedBy        *string `gorm:"size:32;index"`
 	InviteRewardDone bool    `gorm:"not null;default:false"`
@@ -205,7 +207,27 @@ func AutoMigrateModels() []any {
 		&SiteSetting{},
 		&StatCounter{},
 		&ConcurrencyGroup{},
+		&Order{},
 	}
+}
+
+// Order is a points-recharge order paid via 易支付 (epay). ID is our merchant
+// order number (out_trade_no). Status: pending | paid | cancelled. Unpaid orders
+// auto-cancel 30 min after creation (ExpiresAt).
+type Order struct {
+	ID          string  `gorm:"primaryKey;size:40"`
+	UserID      string  `gorm:"size:32;index;not null"`
+	Amount      float64 `gorm:"not null"`               // 充值金额(元)
+	Points      int     `gorm:"not null"`               // 到账积分
+	PayType     string  `gorm:"size:16"`                // wxpay | alipay
+	Status      string  `gorm:"size:16;index;not null"` // pending | paid | cancelled
+	TradeNo     string  `gorm:"size:64;index"`          // 易支付平台订单号
+	PayInfo     string  `gorm:"type:text"`              // 二维码 url / 跳转 url
+	PayInfoType string  `gorm:"size:16"`                // qrcode | jump | html | ...
+	ExpiresAt   time.Time `gorm:"index"`
+	PaidAt      *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // ConcurrencyGroup caps how many generations a member user may run AT ONCE

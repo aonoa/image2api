@@ -104,6 +104,9 @@ func NewApp(ctx context.Context) (*App, error) {
 	}
 	concSvc := service.NewConcurrencyService(rdb)
 	cgroupSvc := service.NewConcurrencyGroupService(cgroupRepo, concSvc)
+	announcementSvc := service.NewAnnouncementService(siteRepo, userRepo)
+	orderRepo := repo.NewOrderRepository(db)
+	paymentSvc := service.NewPaymentService(orderRepo, userRepo, siteRepo)
 	sessionSvc := service.NewSessionService(rdb, cfg.SessionTTL, cfg.SessionSlideAfter)
 	emailCodeSvc := service.NewEmailCodeService(rdb)
 	smtpSvc := service.NewSMTPService()
@@ -150,11 +153,13 @@ func NewApp(ctx context.Context) (*App, error) {
 		UserGen:       handler.NewUserGenerationHandler(userGenSvc, adminReadSvc),
 		ProviderAdmin: handler.NewProviderAdminHandler(tokenSvc, refreshSvc),
 		ConcGroups:    handler.NewConcurrencyGroupHandler(cgroupSvc),
+		Announcement:  handler.NewAnnouncementHandler(announcementSvc),
+		Payment:       handler.NewPaymentHandler(paymentSvc),
 	})
 
 	// Background self-healing sweep (quota recovery, cookie refresh, stale-pending
 	// cleanup, log retention) — the Go equivalent of the Python daemon thread.
-	maintenanceSvc := service.NewMaintenanceService(tokenRepo, tokenSvc, eventRepo, userRepo, refreshSvc, siteRepo, rustfsClient, v1Svc.Inflight(), showcaseRepo)
+	maintenanceSvc := service.NewMaintenanceService(tokenRepo, tokenSvc, eventRepo, userRepo, refreshSvc, siteRepo, rustfsClient, v1Svc.Inflight(), showcaseRepo, orderRepo)
 	loopCtx, loopCancel := context.WithCancel(context.Background())
 	go maintenanceSvc.Run(loopCtx)
 

@@ -456,6 +456,7 @@ func (s *AuthService) PublicUser(ctx context.Context, user *model.User) (map[str
 		"role":           user.Role,
 		"status":         user.Status,
 		"credits":        user.Credits,
+		"recharge_total": user.RechargeTotal,
 		"concurrency_group": concName,
 		"concurrency_limit": concMax,
 		"checkin_last":   user.CheckinLast,

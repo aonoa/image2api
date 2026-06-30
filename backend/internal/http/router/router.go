@@ -26,6 +26,8 @@ type Handlers struct {
 	UserGen       *handler.UserGenerationHandler
 	ProviderAdmin *handler.ProviderAdminHandler
 	ConcGroups    *handler.ConcurrencyGroupHandler
+	Announcement  *handler.AnnouncementHandler
+	Payment       *handler.PaymentHandler
 }
 
 func New(cfg *config.Config, auth *service.AuthService, handlers Handlers) *gin.Engine {
@@ -62,6 +64,9 @@ func New(cfg *config.Config, auth *service.AuthService, handlers Handlers) *gin.
 		publicAdmin.GET("/video-presets", handlers.UserGen.VideoPresets)
 		publicAdmin.GET("/catalog", handlers.UserGen.Catalog)
 		publicAdmin.GET("/models", handlers.UserGen.Models)
+		// 易支付 async notify — called server-to-server by the pay platform, no auth.
+		publicAdmin.GET("/pay/notify", handlers.Payment.Notify)
+		publicAdmin.POST("/pay/notify", handlers.Payment.Notify)
 	}
 
 	authGroup := engine.Group("/admin/api/auth")
@@ -82,6 +87,13 @@ func New(cfg *config.Config, auth *service.AuthService, handlers Handlers) *gin.
 		userAuthed.POST("/test", handlers.UserGen.Test)
 		userAuthed.GET("/jobs/mine", handlers.UserGen.MyJobs)
 		userAuthed.GET("/my-images", handlers.UserGen.MyImages)
+		userAuthed.GET("/announcement", handlers.Announcement.Get)
+		userAuthed.POST("/announcement/seen", handlers.Announcement.MarkSeen)
+		userAuthed.GET("/pay/config", handlers.Payment.Config)
+		userAuthed.POST("/pay/recharge", handlers.Payment.Recharge)
+		userAuthed.GET("/pay/orders", handlers.Payment.MyOrders)
+		userAuthed.GET("/pay/orders/:id", handlers.Payment.OrderStatus)
+		userAuthed.POST("/pay/orders/:id/continue", handlers.Payment.ContinueOrder)
 	}
 
 	authed := engine.Group("/admin/api")
@@ -102,6 +114,7 @@ func New(cfg *config.Config, auth *service.AuthService, handlers Handlers) *gin.
 		authed.PATCH("/concurrency-groups/:id", handlers.ConcGroups.Update)
 		authed.POST("/concurrency-groups/:id/default", handlers.ConcGroups.SetDefault)
 		authed.DELETE("/concurrency-groups/:id", handlers.ConcGroups.Delete)
+		authed.GET("/pay/admin/orders", handlers.Payment.AdminOrders)
 		authed.GET("/cdks", handlers.CDK.List)
 		authed.POST("/cdks", handlers.CDK.Create)
 		authed.POST("/cdks/delete-bulk", handlers.CDK.DeleteBulk)
@@ -158,6 +171,10 @@ func New(cfg *config.Config, auth *service.AuthService, handlers Handlers) *gin.
 			settings.PUT("/logs", handlers.AppSettings.LogsPut)
 			settings.GET("/media", handlers.AppSettings.MediaGet)
 			settings.PUT("/media", handlers.AppSettings.MediaPut)
+			settings.GET("/announcement", handlers.Announcement.AdminGet)
+			settings.PUT("/announcement", handlers.Announcement.AdminPut)
+			settings.GET("/pay", handlers.Payment.SettingsGet)
+			settings.PUT("/pay", handlers.Payment.SettingsSave)
 		}
 	}
 

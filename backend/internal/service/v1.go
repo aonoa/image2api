@@ -722,6 +722,8 @@ func (s *V1Service) runVideoJob(ctx context.Context, principal *APIPrincipal, in
 	defer s.cleanupReferenceImages(ctx, eventID, refFiles)
 	startedAt := time.Now()
 
+	// No-store: capture only the UPSTREAM video URL. /content streams it on demand
+	// (grok URLs are auth-gated → fetched with the generating account's token).
 	var videoURL string
 	var execErr error
 	switch s.effectiveProvider(genCtx, modelItem) {
@@ -748,7 +750,7 @@ func (s *V1Service) runVideoJob(ctx context.Context, principal *APIPrincipal, in
 		_ = s.events.UpdateStatus(ctx, eventID, "failed", "upstream returned no video url", 0)
 		return
 	}
-	// Store the upstream URL as the event's "file"; /content proxies it.
+	// Store the upstream URL as the event's "file"; /content fetches it on demand.
 	if err := s.events.MarkVideoReady(ctx, eventID, videoURL, int(time.Since(startedAt).Milliseconds())); err != nil {
 		return
 	}
@@ -787,6 +789,22 @@ func (s *V1Service) OpenVideoContent(ctx context.Context, principal *APIPrincipa
 	if ev.Status != "success" || strings.TrimSpace(ev.File) == "" {
 		return nil, "", ErrVideoNotReady
 	}
+	// grok asset URLs (assets.grok.com) are auth-gated — a plain GET 403s. Stream
+	// them through the SAME account that generated the clip, using its token. If
+	// that account is gone (grok pools churn often), the clip is unrecoverable.
+	if ev.Provider == "grok" && s.grok != nil {
+		if s.settings != nil {
+			if proxy, perr := s.settings.GetValue(ctx, "proxy.url"); perr == nil {
+				s.grok.SetProxy(proxy)
+			}
+		}
+		acct, _ := s.tokens.Get(ctx, "grok", ev.AccountID)
+		if acct == nil || strings.TrimSpace(acct.Value) == "" {
+			return nil, "", fmt.Errorf("%w: grok account no longer available for this video", ErrProviderTemporary)
+		}
+		return s.grok.OpenAsset(ctx, acct.Value, ev.File)
+	}
+	// Other providers return publicly-fetchable URLs — proxy directly.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ev.File, nil)
 	if err != nil {
 		return nil, "", err
@@ -1251,9 +1269,9 @@ const maxTempDeadAccounts = 3
 //       • tempAsDead=false (default): retry the SAME account up to
 //         maxSameAccountAttempts times (not counted); if still failing, STOP
 //         (no fan-out — an upstream-wide blip fails identically everywhere).
-//       • tempAsDead=true (adobe): treat the temporary error as a DEAD account —
-//         mark it like a 401 and fail over to the next account, capped at
-//         maxTempDeadAccounts accounts so a pool-wide blip can't kill everything.
+//       • tempAsDead=true (adobe): BAN the account (mark dead/disabled) and fail
+//         over to the next account, capped at maxTempDeadAccounts accounts so a
+//         pool-wide blip can't kill everything. Dead accounts don't auto-recover.
 //   - 参数错 / request-level (anything else) → return immediately, no retry, no
 //     account penalty (the account isn't at fault).
 //
@@ -1356,10 +1374,17 @@ func (s *V1Service) tryAccount(ctx context.Context, eventID, pool string, token 
 		if isTemp {
 			if tempAsDead {
 				// Ops policy (adobe): a temporary upstream error ("system under
-				// load" etc.) means this account is effectively dead — mark it
-				// like a 401 and fail over to the next account. The pool driver
-				// caps how many accounts this is allowed to burn.
-				s.markTokenFailure(ctx, pool, token, kind, true, false)
+				// load" etc.) BANS this account — mark it dead/disabled and fail
+				// over to the next account. The pool driver caps how many accounts
+				// this is allowed to burn per request (maxTempDeadAccounts). Note:
+				// dead accounts do NOT auto-recover — they need a manual re-enable.
+				_, _ = s.tokens.Update(ctx, pool, token.ID, map[string]any{
+					"status":       "disabled",
+					"dead":         true,
+					"last_used_at": time.Now(),
+					"fail_total":   gorm.Expr("fail_total + 1"),
+					"fails":        gorm.Expr("fails + 1"),
+				})
 				return nil, err, true, true
 			}
 			tempAttempts++

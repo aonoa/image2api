@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { auth, refreshMe, logout as authLogout } from '../auth'
 import { api, jsonBody } from '../api'
+import { openPayment } from '../payment'
 import Icon from '../components/Icon.vue'
 import { points, pointsLabel } from '../credits'
 import { site } from '../site'
@@ -174,6 +175,41 @@ function toast(m) {
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => (toastMsg.value = ''), 2200)
 }
+
+// ---- Recharge (易支付) ----
+const payCfg = ref({ enabled: false, methods: [], min_amount: 0, points_ratio: 100 })
+const AMOUNTS = [10, 20, 50, 100]
+const picked = ref(10)            // a preset number, or 'custom'
+const customAmount = ref('')
+const payMethod = ref('')
+const rechargeTotal = computed(() => Number(auth.user?.recharge_total || 0))
+const methodName = (m) => ({ wxpay: '微信', alipay: '支付宝' }[m] || m)
+const finalAmount = computed(() => Number(picked.value === 'custom' ? customAmount.value : picked.value) || 0)
+const pointsPreview = computed(() => Math.round(finalAmount.value * (payCfg.value.points_ratio || 0)))
+async function loadPayCfg() {
+  const r = await api('/pay/config')
+  if (r.ok && r.data) {
+    payCfg.value = r.data
+    if (r.data.methods?.length && !payMethod.value) payMethod.value = r.data.methods[0]
+  }
+}
+onMounted(loadPayCfg)
+const recharging = ref(false)
+async function recharge() {
+  if (recharging.value) return
+  const amt = finalAmount.value
+  if (!amt || amt <= 0) { toast('请输入有效金额'); return }
+  if (amt < payCfg.value.min_amount) { toast(`最低充值 ${payCfg.value.min_amount} 元`); return }
+  if (!payMethod.value) { toast('请选择支付方式'); return }
+  recharging.value = true
+  try {
+    const r = await api('/pay/recharge', jsonBody('POST', { amount: amt, method: payMethod.value }))
+    if (!r.ok) { toast(r.data?.detail || '下单失败'); return }
+    openPayment(r.data, { onPaid: refreshMe })
+  } finally {
+    recharging.value = false
+  }
+}
 </script>
 
 <template>
@@ -213,6 +249,10 @@ function toast(m) {
         <div>
           <div class="text-[11px] text-white/40 uppercase tracking-wider mb-1">积分余额</div>
           <div class="text-amber-300 font-semibold tabular-nums">{{ pointsLabel(balance) }}</div>
+        </div>
+        <div>
+          <div class="text-[11px] text-white/40 uppercase tracking-wider mb-1">累计充值</div>
+          <div class="text-emerald-300 font-semibold tabular-nums">¥{{ rechargeTotal }}</div>
         </div>
         <div>
           <div class="text-[11px] text-white/40 uppercase tracking-wider mb-1">并发上限</div>
@@ -302,9 +342,9 @@ function toast(m) {
           <div v-for="(d, i) in last7" :key="d.ds"
                class="flex-1 h-12 rounded-xl ring-1 transition-all flex flex-col items-center justify-center"
                :class="d.lit
-                 ? 'bg-sky-400/25 ring-sky-300/50 text-sky-100'
+                 ? 'bg-sky-500 ring-sky-400 text-white'
                  : d.isToday
-                   ? (checkedToday ? 'bg-sky-400/25 ring-sky-300/50 text-sky-100' : 'bg-white/[0.05] ring-white/15 text-white/60')
+                   ? (checkedToday ? 'bg-sky-500 ring-sky-400 text-white' : 'bg-white/[0.05] ring-white/15 text-white/60')
                    : 'bg-white/[0.02] ring-white/[0.06] text-white/30'">
             <Icon v-if="d.lit || (d.isToday && checkedToday)" name="spark" class="w-3 h-3" />
             <span v-else class="text-[10px] uppercase">{{ d.isToday ? '今' : i + 1 }}</span>
@@ -315,6 +355,35 @@ function toast(m) {
                 class="mt-5 w-full rounded-xl bg-white text-black hover:bg-white/90 disabled:bg-white/10 disabled:text-white/40 disabled:cursor-not-allowed py-3 text-sm font-semibold transition-colors">
           {{ checkedToday ? `今日已签到 · 明天再来` : `立即签到 +${checkinReward} 积分` }}
         </button>
+      </section>
+
+      <!-- RECHARGE (易支付) — hidden unless the admin enabled 充值 -->
+      <section v-if="payCfg.enabled" class="relative card p-7 md:p-8 overflow-hidden">
+        <div class="inline-grid w-10 h-10 rounded-xl bg-emerald-500/15 ring-1 ring-emerald-400/30 grid place-items-center text-emerald-300">
+          <Icon name="spark" class="w-4 h-4" />
+        </div>
+        <h2 class="text-xl font-bold mt-4">积分充值</h2>
+        <p class="text-sm text-white/50 mt-2">累计充值 <strong class="text-emerald-300">¥{{ rechargeTotal }}</strong> · {{ payCfg.points_ratio }} 积分 / 元</p>
+
+        <div class="grid grid-cols-3 sm:grid-cols-5 gap-2 mt-5">
+          <button v-for="a in AMOUNTS" :key="a" @click="picked = a" class="amt" :class="picked === a && 'amt-on'">{{ a }}元</button>
+          <button @click="picked = 'custom'" class="amt" :class="picked === 'custom' && 'amt-on'">自定义</button>
+        </div>
+        <input v-if="picked === 'custom'" v-model="customAmount" type="number" min="1" step="1" placeholder="输入金额(元)"
+               class="amt-input mt-3 w-full px-4 py-2.5 text-sm" />
+
+        <div class="flex gap-2 mt-4">
+          <button v-for="m in payCfg.methods" :key="m" @click="payMethod = m" class="amt flex-1" :class="payMethod === m && 'amt-on'">{{ methodName(m) }}</button>
+        </div>
+
+        <div class="mt-5 flex items-center justify-between gap-3">
+          <span class="text-sm text-white/60">到账 <strong class="text-violet-300 text-base tabular-nums">{{ pointsPreview }}</strong> 积分</span>
+          <button @click="recharge" :disabled="recharging"
+                  class="rounded-xl bg-white text-black hover:bg-white/90 disabled:opacity-60 disabled:cursor-not-allowed px-6 py-2.5 text-sm font-semibold transition-colors inline-flex items-center gap-2">
+            <span v-if="recharging" class="w-3.5 h-3.5 rounded-full border-2 border-black/30 border-t-black animate-spin"></span>
+            {{ recharging ? '下单中…' : '立即充值' }}
+          </button>
+        </div>
       </section>
 
       <!-- CDK REDEEM — hidden when the admin turns the 兑换码 switch off -->
@@ -398,4 +467,31 @@ function toast(m) {
 <style scoped>
 .fade-enter-active, .fade-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(8px); }
+
+/* Recharge amount / method buttons — theme-aware (clean in light AND dark).
+   Selected uses the inverted solid-button color, not a harsh violet. */
+.amt {
+  border-radius: 0.6rem;
+  padding: 0.6rem 0;
+  font-size: 0.875rem;
+  text-align: center;
+  color: var(--fg-2);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.amt:hover { color: var(--fg); background: var(--hover); }
+.amt-on {
+  background: var(--btn-solid-bg);
+  color: var(--btn-solid-fg);
+  box-shadow: none;
+}
+.amt-input {
+  border-radius: 0.7rem;
+  color: var(--fg);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  outline: none;
+}
+.amt-input:focus { box-shadow: inset 0 0 0 1px var(--fg-3); }
 </style>

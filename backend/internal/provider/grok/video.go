@@ -224,6 +224,46 @@ func (c *Client) doPost(ctx context.Context, client tlsclient.HttpClient, token,
 	return raw, resp.StatusCode, nil
 }
 
+// OpenAsset streams a grok asset (e.g. a generated video) authenticated with the
+// account token — used by the async /v1/videos /content proxy. The caller MUST
+// close the returned ReadCloser.
+func (c *Client) OpenAsset(ctx context.Context, token, url string) (io.ReadCloser, string, error) {
+	token = strings.TrimSpace(strings.TrimPrefix(token, "Bearer "))
+	if token == "" {
+		return nil, "", ErrAuth
+	}
+	client, err := c.newTLSClient()
+	if err != nil {
+		return nil, "", err
+	}
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req = req.WithContext(ctx)
+	req.Header = http.Header{
+		"user-agent": {userAgent},
+		"referer":    {origin + "/"},
+		"cookie":     {"sso=" + token + "; sso-rw=" + token},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: %v", ErrTemporaryUpstream, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		resp.Body.Close()
+		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			return nil, "", fmt.Errorf("%w: asset %d", ErrAuth, resp.StatusCode)
+		}
+		return nil, "", fmt.Errorf("%w: asset %d", ErrTemporaryUpstream, resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "video/mp4"
+	}
+	return resp.Body, ct, nil
+}
+
 func (c *Client) download(ctx context.Context, client tlsclient.HttpClient, token, url string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -258,10 +298,20 @@ func mapStatus(path string, status int, raw []byte) error {
 	switch {
 	case status == 200:
 		return nil
+	case status == 403 && strings.Contains(strings.ToLower(string(raw)), "anti-bot"):
+		// grok bot-detection (proxy/TLS fingerprint), NOT a dead token — transient,
+		// so a good account isn't killed by an IP/anti-bot hiccup.
+		return fmt.Errorf("%w: %s 403 %s", ErrTemporaryUpstream, path, clip(raw, 160))
 	case status == 401 || status == 403:
 		return fmt.Errorf("%w: %s %d %s", ErrAuth, path, status, clip(raw, 160))
 	case status == 429:
-		return fmt.Errorf("%w: %s 429 %s", ErrQuotaExhausted, path, clip(raw, 160))
+		// 429 is grok RATE-LIMITING ("Too many requests") — a transient error that
+		// must NOT kill the account. Only a body that names a credit/usage-pool
+		// exhaustion is a real quota wall.
+		if isCreditError(string(raw)) {
+			return fmt.Errorf("%w: %s 429 %s", ErrQuotaExhausted, path, clip(raw, 160))
+		}
+		return fmt.Errorf("%w: %s 429 %s", ErrTemporaryUpstream, path, clip(raw, 160))
 	case status >= 500:
 		return fmt.Errorf("%w: %s %d %s", ErrTemporaryUpstream, path, status, clip(raw, 160))
 	default:

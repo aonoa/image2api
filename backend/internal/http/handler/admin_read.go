@@ -182,6 +182,7 @@ func userPublic(user model.User) gin.H {
 		"status":         user.Status,
 		"credits":        user.Credits,
 		"notes":          user.Notes,
+		"recharge_total": user.RechargeTotal,
 		"concurrency_group_id": user.ConcurrencyGroupID,
 		"created_at":     unixSec(user.CreatedAt),
 		"last_login_at":  unixSecPtr(user.LastLoginAt),

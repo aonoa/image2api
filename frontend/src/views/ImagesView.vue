@@ -144,8 +144,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                  @mouseenter="$event.target.play && $event.target.play()"
                  @mouseleave="$event.target.pause && $event.target.pause()" />
         </template>
-        <img v-else :src="generatedUrl(f.name)" loading="lazy"
-             class="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+        <!-- background-image (not <img>) so Edge shows no 视觉搜索 overlay icon. -->
+        <div v-else :style="{ backgroundImage: `url(${generatedUrl(f.name)})` }"
+             class="absolute inset-0 w-full h-full bg-cover bg-center transition-transform duration-300 group-hover:scale-105"></div>
 
         <!-- gradient veil (always visible so the prompt overlay reads) -->
         <div class="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/85 via-black/40 to-transparent pointer-events-none"></div>

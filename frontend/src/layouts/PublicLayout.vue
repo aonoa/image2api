@@ -19,6 +19,7 @@ const nav = computed(() => {
     items.push({ to: '/logs', label: '图片', icon: 'files' })
     items.push({ to: '/mylogs', label: '日志', icon: 'log' })
     items.push({ to: '/invite', label: '邀请', icon: 'accounts' })
+    items.push({ to: '/orders', label: '订单', icon: 'receipt' })
   }
   // 文档 + 关于 are public — visible to guests too.
   items.push({ to: '/docs', label: '文档', icon: 'log' })
@@ -87,7 +88,7 @@ const currentLabel = computed(() => {
         </button>
         <router-link to="/settings" title="设置" @click="onSettings"
                      :class="$route.path === '/settings' ? 'rail-bottom active' : 'rail-bottom'">
-          <Icon name="config" class="w-4 h-4" />
+          <Icon name="accounts" class="w-4 h-4" />
         </router-link>
       </div>
     </aside>

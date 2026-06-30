@@ -604,7 +604,12 @@ func (c *Client) submitVideo(ctx context.Context, client tlsclient.HttpClient, t
 		// it's a bad token, a missing scope, or a WAF/fingerprint block.
 		return respBody, "", fmt.Errorf("%w (%d %s: %s)", ErrAuth, resp.StatusCode, resp.Header.Get("x-access-error"), clip(respBody, 300))
 	}
-	if resp.StatusCode == 429 || resp.StatusCode == 451 || resp.StatusCode >= 500 {
+	if resp.StatusCode == 408 || resp.StatusCode == 429 || resp.StatusCode == 451 || resp.StatusCode >= 500 {
+		return respBody, "", ErrTemporaryUpstream
+	}
+	// "system under load" / timeout_error = adobe overload — treat as a temporary
+	// error so the tempAsDead policy retires the account (same as the image path).
+	if b := string(respBody); strings.Contains(b, "system under load") || strings.Contains(b, "timeout_error") {
 		return respBody, "", ErrTemporaryUpstream
 	}
 	if resp.StatusCode != 200 {

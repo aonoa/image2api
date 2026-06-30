@@ -28,13 +28,14 @@ type MaintenanceService struct {
 	store           *storage.Client
 	inflight        *InflightRegistry
 	showcase        *repo.ShowcaseRepository
+	orders          *repo.OrderRepository
 	interval        time.Duration
 	stalePending    time.Duration
 	mediaPruneEvery time.Duration
 	lastMediaPrune  time.Time
 }
 
-func NewMaintenanceService(tokens *repo.TokenRepository, tokenSvc *TokenService, events *repo.EventRepository, users *repo.UserRepository, refresh *RefreshProfileService, settings *repo.SiteSettingRepository, store *storage.Client, inflight *InflightRegistry, showcase *repo.ShowcaseRepository) *MaintenanceService {
+func NewMaintenanceService(tokens *repo.TokenRepository, tokenSvc *TokenService, events *repo.EventRepository, users *repo.UserRepository, refresh *RefreshProfileService, settings *repo.SiteSettingRepository, store *storage.Client, inflight *InflightRegistry, showcase *repo.ShowcaseRepository, orders *repo.OrderRepository) *MaintenanceService {
 	return &MaintenanceService{
 		tokens:          tokens,
 		tokenSvc:        tokenSvc,
@@ -45,6 +46,7 @@ func NewMaintenanceService(tokens *repo.TokenRepository, tokenSvc *TokenService,
 		store:           store,
 		inflight:        inflight,
 		showcase:        showcase,
+		orders:          orders,
 		interval:        60 * time.Second,
 		stalePending:    600 * time.Second,
 		mediaPruneEvery: 60 * time.Second,
@@ -99,6 +101,15 @@ func (m *MaintenanceService) syncRecoveredQuota(accs []model.TokenAccount) {
 }
 
 func (m *MaintenanceService) tick(ctx context.Context) {
+	// 0. Auto-cancel unpaid recharge orders past their 30-min TTL.
+	if m.orders != nil {
+		if n, err := m.orders.ExpirePending(ctx, time.Now()); err != nil {
+			log.Printf("maintenance: expire orders: %v", err)
+		} else if n > 0 {
+			log.Printf("maintenance: cancelled %d expired order(s)", n)
+		}
+	}
+
 	// 1. Re-activate quota-exhausted tokens whose reset time has passed, then
 	//    auto-sync their real balance — these providers only refresh quota when
 	//    accessed, so recovery alone would leave a stale 0/—. For krea the sync

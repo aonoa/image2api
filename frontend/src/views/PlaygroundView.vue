@@ -360,7 +360,7 @@ let prevPending = 0
 async function loadHistory() {
   // Server-side filter: status IN (pending, success), newest 12 — exactly the
   // rows the grid shows, in one query (no client over-fetch).
-  const r = await api('/logs?limit=10&statuses=pending,success')
+  const r = await api('/logs?limit=10&statuses=pending,success&source=user')
   if (!r.ok) return
   history.value = (r.data?.data || [])
     .filter((e) => e.status === 'pending' || e.file)
@@ -432,20 +432,16 @@ function lastFrameDataUrl(url) {
   })
 }
 
-// Click a generated VIDEO. For a 首尾帧 (frame) model, set the video's LAST frame
-// as the 首帧 (first reference) — to continue the scene. Otherwise just zoom.
-async function onVideoClick(item) {
-  if (refMode.value === 'frame' && maxRefs.value > 0 && item.url) {
-    const dataUrl = await lastFrameDataUrl(item.url)
-    if (dataUrl) {
-      const ref = { name: 'frame', dataUrl }
-      if (refImages.value.length === 0) refImages.value = [ref]
-      else refImages.value.splice(0, 1, ref)   // replace the 首帧 slot
-      flash('已把视频末帧设为首帧')
-      return
-    }
-  }
-  lightbox.value = item
+// Use a generated VIDEO's LAST frame as the 首帧 (first reference) — 首尾帧
+// (frame) models only. Triggered by the small button; clicking the video zooms.
+async function useVideoFrame(item) {
+  if (!item || !item.url) return
+  const dataUrl = await lastFrameDataUrl(item.url)
+  if (!dataUrl) { flash('截取末帧失败'); return }
+  const ref = { name: 'frame', dataUrl }
+  if (refImages.value.length === 0) refImages.value = [ref]
+  else refImages.value.splice(0, 1, ref)   // replace the 首帧 slot
+  flash('已把视频末帧设为首帧')
 }
 
 function onKey(e) { if (e.key === 'Escape') lightbox.value = null }
@@ -639,26 +635,28 @@ onUnmounted(() => {
           <!-- done: media + caption -->
           <template v-if="item.status === 'done' && item.url">
             <video v-if="item.kind === 'video'" :src="item.url" muted loop preload="metadata"
-                   @click="onVideoClick(item)"
-                   :title="refMode === 'frame' && maxRefs > 0 ? '点击:把末帧设为首帧' : '点击放大'"
-                   class="absolute inset-0 w-full h-full object-cover cursor-pointer"
+                   @click="lightbox = item" title="点击放大"
+                   class="absolute inset-0 w-full h-full object-cover cursor-zoom-in"
                    @mouseenter="$event.target.play && $event.target.play()"
                    @mouseleave="$event.target.pause && $event.target.pause()" />
-            <img v-else :src="item.url" loading="lazy" @click="useAsRef(item)"
-                 :title="maxRefs > 0 ? '点击作为参考图' : ''"
-                 class="absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                 :class="maxRefs > 0 ? 'cursor-pointer' : 'cursor-default'" />
+            <!-- background-image (not <img>) so Edge shows no 视觉搜索 overlay icon. -->
+            <div v-else @click="lightbox = item" title="点击放大"
+                 :style="{ backgroundImage: `url(${item.url})` }"
+                 class="absolute inset-0 w-full h-full bg-cover bg-center cursor-zoom-in transition-transform duration-300 group-hover:scale-105"></div>
             <div class="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/85 via-black/30 to-transparent pointer-events-none"></div>
-            <!-- hover action: just zoom (clicking the image itself = 参考图) -->
+            <!-- hover action: 上参考图. Image → use as reference; video → 末帧设为首帧
+                 (only shown when the model supports 首尾帧). Clicking the media zooms. -->
             <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button @click.stop="lightbox = item" title="放大"
+              <button v-if="item.kind === 'video' ? (refMode === 'frame' && maxRefs > 0) : (maxRefs > 0)"
+                      @click.stop="item.kind === 'video' ? useVideoFrame(item) : useAsRef(item)"
+                      :title="item.kind === 'video' ? '把末帧设为首帧' : '作为参考图'"
                       class="w-7 h-7 rounded-lg bg-black/50 ring-1 ring-white/10 hover:bg-black/70 text-white grid place-items-center">
-                <Icon name="open" class="w-3.5 h-3.5" />
+                <Icon name="plus" class="w-3.5 h-3.5" />
               </button>
             </div>
             <div class="absolute inset-x-0 bottom-0 p-2.5 pointer-events-none">
-              <div class="text-[11px] leading-tight text-white font-medium line-clamp-2" :title="item.prompt">{{ item.prompt }}</div>
-              <div class="text-[9px] text-white/55 mt-0.5 font-mono truncate">{{ item.model }}<span v-if="item.elapsed_ms"> · {{ (item.elapsed_ms / 1000).toFixed(1) }}s</span></div>
+              <div class="pg-cap text-[11px] leading-tight font-medium line-clamp-2" :title="item.prompt">{{ item.prompt }}</div>
+              <div class="pg-cap-sub text-[9px] mt-0.5 font-mono truncate">{{ item.model }}<span v-if="item.elapsed_ms"> · {{ (item.elapsed_ms / 1000).toFixed(1) }}s</span></div>
             </div>
           </template>
           <!-- pending / running -->
@@ -705,4 +703,10 @@ onUnmounted(() => {
 <style scoped>
 .fade-enter-active, .fade-leave-active { transition: opacity 0.15s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+/* Card captions sit on a dark gradient — keep them white even in light theme.
+   The global `.theme-text` remap would otherwise darken them (it turns
+   over-image whites dark for the marketing pages), making them unreadable here. */
+.pg-cap { color: #fff !important; }
+.pg-cap-sub { color: rgb(255 255 255 / 0.62) !important; }
 </style>
