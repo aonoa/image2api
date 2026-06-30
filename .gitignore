@@ -10,10 +10,15 @@
 
 # ======================================================================
 # Private — not shipped to users (internal deploy scripts + secrets).
-# deploy/ holds the maintainer's SSH/deploy + test scripts with hardcoded
-# server host, root password and API keys. NEVER commit.
+# deploy/ mostly holds maintainer-only scripts with hardcoded hosts and secrets.
+# Only the sanitized Purefox profile below is shipped.
 # ======================================================================
-/deploy/
+/deploy/*
+!/deploy/purefox/
+!/deploy/purefox/**
+/deploy/purefox/.env
+/deploy/purefox/data/
+/deploy/purefox/backups/
 .env
 .env.local
 .env.*.local
