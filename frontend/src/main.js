@@ -110,7 +110,7 @@ router.beforeEach(async (to) => {
 function applyTitle(route) {
   const label = route.meta?.label || ''
   const scope = route.path.startsWith('/admin') ? 'Admin · ' : ''
-  const brand = site.title || 'Vivid'
+  const brand = site.title || 'ManyToken'
   document.title = label ? `${brand} • ${scope}${label}` : brand
 }
 router.afterEach(applyTitle)

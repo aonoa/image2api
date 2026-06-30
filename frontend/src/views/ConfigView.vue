@@ -246,8 +246,8 @@ onMounted(() => { loadSite(); loadReg(); loadSmtp(); loadCredits(); loadProxy();
       </div>
       <div class="space-y-3">
         <label class="row">
-          <span><span class="lbl">网页主标题</span><span class="hint">显示在浏览器标签、首页 Logo、侧栏和登录卡上。未设置时默认显示 "Vivid"。</span></span>
-          <input v-model="siteForm.title" placeholder="Vivid" class="txt" />
+          <span><span class="lbl">网页主标题</span><span class="hint">显示在浏览器标签、首页 Logo、侧栏和登录卡上。未设置时默认显示 "ManyToken"。</span></span>
+          <input v-model="siteForm.title" placeholder="ManyToken" class="txt" />
         </label>
         <div class="row">
           <span><span class="lbl">Logo</span><span class="hint">侧栏 / 公开页头部 / 浏览器标签的 Logo。点击或拖拽图片到下图替换,点「保存设置」后才上传到存储(替换会自动删旧图)。下图当前显示的就是默认 Logo。</span></span>

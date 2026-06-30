@@ -34,7 +34,7 @@ Optional:
 
 ```powershell
 $env:APP_ENV="development"
-$env:APP_TITLE="Vivid AI"
+$env:APP_TITLE="ManyToken"
 $env:SESSION_COOKIE_NAME="vivid_session"
 $env:CORS_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
 ```

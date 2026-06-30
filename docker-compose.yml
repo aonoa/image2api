@@ -67,7 +67,7 @@ services:
       context: ./backend
     environment:
       APP_ENV: production
-      APP_TITLE: ${APP_TITLE:-image2api}
+      APP_TITLE: ${APP_TITLE:-ManyToken}
       HTTP_ADDR: 0.0.0.0:6666
       POSTGRES_DSN: host=postgres user=postgres password=${POSTGRES_PASSWORD:-change-me-postgres} dbname=vivid_ai port=5432 sslmode=disable TimeZone=Asia/Shanghai
       REDIS_ADDR: redis:6379

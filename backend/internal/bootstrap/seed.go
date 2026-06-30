@@ -9,7 +9,7 @@ import (
 
 func seedDefaults(ctx context.Context, db *gorm.DB) error {
 	defaults := []model.SiteSetting{
-		{Key: "site.title", Value: "Vivid"},
+		{Key: "site.title", Value: "ManyToken"},
 		{Key: "site.logo", Value: ""},
 		{Key: "site.subtitle", Value: ""},
 		{Key: "contact.qq", Value: "1114639355"},

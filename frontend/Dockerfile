@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Frontend is open-source: built from source inside the image, then served by
 # nginx which also reverse-proxies the API and terminates TLS (certs from the
 # acme.sh sidecar via a shared volume).

@@ -7,7 +7,7 @@ import { reactive } from 'vue'
 const BASE = import.meta.env.VITE_API_BASE || ''
 
 export const site = reactive({
-  title: 'Vivid',
+  title: 'ManyToken',
   logo: '',
   subtitle: '',
   cdkRedeemEnabled: true,
@@ -25,7 +25,7 @@ export const site = reactive({
   ready: false,
 })
 
-// Point the browser-tab favicon at a custom logo (or back to the default svg).
+// Point the browser-tab favicon at a custom logo (or back to the default icon).
 export function applyFavicon(url) {
   let link = document.querySelector("link[rel~='icon']")
   if (!link) {
@@ -33,8 +33,8 @@ export function applyFavicon(url) {
     link.rel = 'icon'
     document.head.appendChild(link)
   }
-  link.removeAttribute('type') // a png/jpg logo must not be forced as svg
-  link.href = url || '/favicon.svg'
+  link.removeAttribute('type')
+  link.href = url || '/purefox_1_eye_192.png'
 }
 
 export async function loadSite() {
