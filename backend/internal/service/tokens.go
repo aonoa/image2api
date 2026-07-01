@@ -1451,7 +1451,11 @@ func (s *TokenService) Quota(ctx context.Context, pool, id string) (map[string]a
 			meta["cached_quota_total"] = total
 		}
 		patch["meta"] = meta
-		if reset := strings.TrimSpace(stringValue(data["reset_after"])); reset != "" {
+		// Recovery time is the death deadline: the maintenance sweep expires a grok
+		// account once this marker passes (grok sso can't be renewed). Only stamp it
+		// when still unset (import couldn't resolve it) — never move it forward on a
+		// later refresh, so an admin opening 账号管理 can't push the death time out.
+		if reset := strings.TrimSpace(stringValue(data["reset_after"])); reset != "" && strings.TrimSpace(item.CachedQuotaResetAfter) == "" {
 			patch["cached_quota_reset_after"] = reset
 			item.CachedQuotaResetAfter = reset
 		}
