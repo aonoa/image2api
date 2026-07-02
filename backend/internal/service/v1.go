@@ -1262,10 +1262,10 @@ const maxSameAccountAttempts = 3
 // may run (grok tolerates 10, unlike the 1-per-account default elsewhere).
 const grokConcurrencyPerAccount = 10
 
-// maxTempDeadAccounts caps how many accounts the "temporary error = dead account"
-// policy (tempAsDead, used by adobe) is allowed to mark dead + fail over before
-// giving up, so an upstream-wide blip ("system under load") can't nuke the whole
-// pool. After this many accounts fail this way, the request fails.
+// maxTempDeadAccounts caps how many accounts the "temporary error = fail over"
+// policy (tempFailover, used by adobe) may burn per request before giving up, so
+// an upstream-wide blip ("system under load") can't fan a single request out
+// across the whole pool. After this many accounts fail this way, the request fails.
 const maxTempDeadAccounts = 3
 
 // runPoolWithFailover drives a generation across a round-robin-ordered account
@@ -1277,13 +1277,14 @@ const maxTempDeadAccounts = 3
 //   - 认证失效 auth → refresh the token from its cookie and retry ONCE with the
 //     fresh token; if it still auth-fails (or there's nothing to refresh, e.g.
 //     chatgpt's JWT IS the credential), mark the account and fail over.
-//   - 上游临时 temporary → behavior depends on tempAsDead:
-//       • tempAsDead=false (default): retry the SAME account up to
+//   - 上游临时 temporary → behavior depends on tempFailover:
+//       • tempFailover=false (default): retry the SAME account up to
 //         maxSameAccountAttempts times (not counted); if still failing, STOP
 //         (no fan-out — an upstream-wide blip fails identically everywhere).
-//       • tempAsDead=true (adobe): BAN the account (mark dead/disabled) and fail
-//         over to the next account, capped at maxTempDeadAccounts accounts so a
-//         pool-wide blip can't kill everything. Dead accounts don't auto-recover.
+//       • tempFailover=true (adobe): fail over to the next account WITHOUT
+//         penalizing this one (rate-limit/overload isn't the account's fault),
+//         capped at maxTempDeadAccounts accounts so a pool-wide blip can't fan
+//         a single request out across everything.
 //   - 参数错 / request-level (anything else) → return immediately, no retry, no
 //     account penalty (the account isn't at fault).
 //
@@ -1296,7 +1297,7 @@ func (s *V1Service) runPoolWithFailover(ctx context.Context, eventID, pool strin
 	attempt func(token model.TokenAccount) ([]byte, error),
 	classify func(error) (isAuth, isQuota, isTemporary bool),
 	refreshOnAuth func(tokenID string) (model.TokenAccount, bool),
-	tempAsDead bool,
+	tempFailover bool,
 ) ([]byte, error) {
 	var lastErr error
 	busy := 0
@@ -1310,16 +1311,16 @@ func (s *V1Service) runPoolWithFailover(ctx context.Context, eventID, pool strin
 		// release via defer so a panic in tryAccount can't leak the 1-job slot.
 		data, err, failover, tempDead := func() ([]byte, error, bool, bool) {
 			defer s.acctRelease(ctx, token.ID, eventID)
-			return s.tryAccount(ctx, eventID, pool, token, kind, attempt, classify, refreshOnAuth, tempAsDead)
+			return s.tryAccount(ctx, eventID, pool, token, kind, attempt, classify, refreshOnAuth, tempFailover)
 		}()
 		if err == nil {
 			return data, nil
 		}
 		lastErr = err
 		if tempDead {
-			// temp-as-dead policy: this account was marked dead for a temporary
-			// upstream error. Cap how many accounts that can burn before we stop,
-			// so an upstream-wide blip doesn't wipe the whole pool.
+			// temp-failover policy: this account hit a temporary upstream error.
+			// Cap how many accounts one request may burn before we stop, so an
+			// upstream-wide blip doesn't fan out across the whole pool.
 			tempDeadCount++
 			if tempDeadCount >= maxTempDeadAccounts {
 				return nil, lastErr
@@ -1350,7 +1351,7 @@ func (s *V1Service) tryAccount(ctx context.Context, eventID, pool string, token 
 	attempt func(token model.TokenAccount) ([]byte, error),
 	classify func(error) (isAuth, isQuota, isTemporary bool),
 	refreshOnAuth func(tokenID string) (model.TokenAccount, bool),
-	tempAsDead bool,
+	tempFailover bool,
 ) ([]byte, error, bool, bool) {
 	_ = s.events.SetAccount(ctx, eventID, token.ID)
 	_ = s.tokens.TouchLastUsed(ctx, token.ID)
@@ -1384,15 +1385,13 @@ func (s *V1Service) tryAccount(ctx context.Context, eventID, pool string, token 
 			return nil, err, true, false
 		}
 		if isTemp {
-			if tempAsDead {
+			if tempFailover {
 				// Ops policy (adobe): a temporary upstream error ("system under
-				// load" etc.) BANS this account — mark it dead/disabled and fail
-				// over to the next account. The pool driver caps how many accounts
-				// this is allowed to burn per request (maxTempDeadAccounts). Note:
-				// dead accounts do NOT auto-recover — they need a manual re-enable.
+				// load" / rate-limit) is NOT the account's fault — record the
+				// failure but keep the account active, and fail over to the next
+				// account. The pool driver caps how many accounts one request may
+				// burn this way (maxTempDeadAccounts).
 				_, _ = s.tokens.Update(ctx, pool, token.ID, map[string]any{
-					"status":       "disabled",
-					"dead":         true,
 					"last_used_at": time.Now(),
 					"fail_total":   gorm.Expr("fail_total + 1"),
 					"fails":        gorm.Expr("fails + 1"),
@@ -1455,9 +1454,9 @@ func (s *V1Service) generateAdobeImage(ctx context.Context, eventID string, mode
 		return nil, err
 	}
 
-	// Round-robin order. Adobe uses tempAsDead=true: a temporary upstream error
-	// ("system under load") marks the account dead (like a 401) and fails over to
-	// the next account, capped at maxTempDeadAccounts; auth/quota also fail over
+	// Round-robin order. Adobe uses tempFailover=true: a temporary upstream error
+	// ("system under load") fails over to the next account without penalizing the
+	// current one, capped at maxTempDeadAccounts; auth/quota also fail over
 	// (see runPoolWithFailover).
 	return s.runPoolWithFailover(ctx, eventID, "adobe", active, "image", func(token model.TokenAccount) ([]byte, error) {
 		var blobIDs []string
@@ -1518,8 +1517,8 @@ func (s *V1Service) generateAdobeVideo(ctx context.Context, eventID string, mode
 	referenceMode := defaultString(strings.TrimSpace(modelItem.ReferenceMode), "frame")
 
 	// Round-robin order; same-account retry on transient errors, fail over to the
-	// next account on auth/quota; temporary upstream errors mark the account dead
-	// and fail over too (tempAsDead, capped at maxTempDeadAccounts). videoURL is
+	// next account on auth/quota; temporary upstream errors fail over too without
+	// penalizing the account (tempFailover, capped at maxTempDeadAccounts). videoURL is
 	// captured from the successful attempt's meta (the upstream presigned URL).
 	var videoURL string
 	data, err := s.runPoolWithFailover(ctx, eventID, "adobe", active, "video", func(token model.TokenAccount) ([]byte, error) {

@@ -636,7 +636,7 @@ func (c *Client) submitVideo(ctx context.Context, client tlsclient.HttpClient, t
 		return respBody, "", ErrTemporaryUpstream
 	}
 	// "system under load" / timeout_error = adobe overload — treat as a temporary
-	// error so the tempAsDead policy retires the account (same as the image path).
+	// error so the tempFailover policy moves to the next account (same as the image path).
 	if b := string(respBody); strings.Contains(b, "system under load") || strings.Contains(b, "timeout_error") {
 		return respBody, "", ErrTemporaryUpstream
 	}
