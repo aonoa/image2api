@@ -70,7 +70,7 @@ func (h *UserGenerationHandler) Generate(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrUnknownModel):
 			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error()})
-		case errors.Is(err, service.ErrUnsupportedParams), errors.Is(err, service.ErrPromptTooLong):
+		case errors.Is(err, service.ErrUnsupportedParams):
 			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		case errors.Is(err, service.ErrInsufficientFunds):
 			c.JSON(http.StatusPaymentRequired, gin.H{"detail": "积分不足"})
@@ -132,7 +132,7 @@ func (h *UserGenerationHandler) Test(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrUnknownModel):
 			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error()})
-		case errors.Is(err, service.ErrUnsupportedParams), errors.Is(err, service.ErrPromptTooLong):
+		case errors.Is(err, service.ErrUnsupportedParams):
 			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		case errors.Is(err, service.ErrProviderQuota):
 			c.JSON(http.StatusTooManyRequests, gin.H{"detail": err.Error()})
@@ -356,17 +356,17 @@ func (h *UserGenerationHandler) Models(c *gin.Context) {
 func (h *UserGenerationHandler) catalogEntries(c *gin.Context) ([]gin.H, error) {
 	items := []gin.H{
 		{
-			"id":             "gpt-image-2",
-			"provider":       "chatgpt",
-			"type":           "image",
+			"id":       "gpt-image-2",
+			"provider": "chatgpt",
+			"type":     "image",
 			// ChatGPT web backend only reliably produces 1K and honors a limited
 			// ratio set; size params are advisory prompt hints. Mirrors the Python
 			// reference (providers/chatgpt/provider.py) — do not offer 2K/4K.
-			"ratios":         []string{"1:1", "16:9", "9:16", "4:3", "3:4"},
-			"resolutions":    []string{"1K"},
-			"image_to_image": true,
+			"ratios":               []string{"1:1", "16:9", "9:16", "4:3", "3:4"},
+			"resolutions":          []string{"1K"},
+			"image_to_image":       true,
 			"max_reference_images": 3,
-			"description":    "ChatGPT image generation",
+			"description":          "ChatGPT image generation",
 		},
 		{
 			"id":                   "firefly-gpt-image-2",
@@ -521,9 +521,9 @@ func (h *UserGenerationHandler) catalogEntries(c *gin.Context) ([]gin.H, error) 
 func (h *UserGenerationHandler) publicModels() ([]gin.H, error) {
 	items := []gin.H{
 		{
-			"id":          "gpt-image-2",
-			"provider":    "chatgpt",
-			"kind":        "image",
+			"id":       "gpt-image-2",
+			"provider": "chatgpt",
+			"kind":     "image",
 			// See catalogEntries — ChatGPT only reliably does 1K and a limited
 			// ratio set; matches the Python reference. Keep both lists in sync.
 			"ratios":      []string{"1:1", "16:9", "9:16", "4:3", "3:4"},
