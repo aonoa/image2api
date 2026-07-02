@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - ${DATA_DIR:-../data}/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d vivid_ai"]
       interval: 5s
@@ -22,7 +22,7 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     container_name: image2api-redis
     volumes:
-      - ./data/redis:/data
+      - ${DATA_DIR:-../data}/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -39,7 +39,7 @@ services:
       RUSTFS_ADDRESS: ":9000"
       RUSTFS_VOLUMES: /data
     volumes:
-      - ./data/rustfs:/data
+      - ${DATA_DIR:-../data}/rustfs:/data
     restart: unless-stopped
 
   createbucket:
@@ -63,7 +63,7 @@ services:
 
   backend:
     build:
-      context: ../../backend
+      context: ${APP_DIR:-../app}/backend
     image: image2api-backend:local
     container_name: image2api-backend
     environment:
@@ -83,7 +83,7 @@ services:
       RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
       RUSTFS_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
     volumes:
-      - ./data/generated:/app/data/generated
+      - ${DATA_DIR:-../data}/generated:/app/data/generated
     depends_on:
       postgres:
         condition: service_healthy
@@ -100,8 +100,8 @@ services:
 
   web:
     build:
-      context: ../../frontend
-      dockerfile: ../deploy/purefox/frontend.Dockerfile
+      context: ${APP_DIR:-../app}
+      dockerfile: ${FRONTEND_DOCKERFILE:-../deploy/frontend.Dockerfile}
     image: image2api-web:local
     container_name: image2api-web
     environment:

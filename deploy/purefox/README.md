@@ -8,7 +8,19 @@ It intentionally keeps the upstream one-command deployment separate:
 - Removes the `acme` sidecar and frontend container certificate scripts from this profile.
 - Reuses the host wildcard certificate for `*.purefox.org`.
 - Keeps PostgreSQL, Redis, RustFS, backend, and web on a private Docker network.
-- Stores persistent data as bind mounts under `deploy/purefox/data/` for easier migration.
+- Stores persistent data as bind mounts under `/srv/image2api/data/` by default for easier migration.
+
+## Server Layout
+
+```text
+/srv/image2api/
+  app/       # application source
+  deploy/    # this profile directory
+  data/      # PostgreSQL, Redis, RustFS, generated files
+  backups/   # backup archives
+```
+
+The paths are configurable with `APP_DIR`, `DATA_DIR`, `BACKUP_DIR`, and `FRONTEND_DOCKERFILE` in `.env`.
 
 ## Files
 
@@ -27,7 +39,7 @@ deploy/purefox/
 ## First Deploy
 
 ```bash
-cd deploy/purefox
+cd /srv/image2api/deploy
 cp .env.example .env
 chmod 600 .env
 # Edit .env and set strong POSTGRES_PASSWORD, S3_ACCESS_KEY, S3_SECRET_KEY.
@@ -54,17 +66,17 @@ Expected host exposure: only `127.0.0.1:18087` from this stack. Public traffic s
 
 ## Migration
 
-Copy this profile directory, including `.env`, `data/`, and `backups/`, to the target host. Restore the host Nginx config and wildcard certificate path, then run:
+Copy `/srv/image2api/app`, `/srv/image2api/deploy`, `/srv/image2api/data`, and `/srv/image2api/backups` to the target host. Restore the host Nginx config and wildcard certificate path, then run:
 
 ```bash
-cd deploy/purefox
+cd /srv/image2api/deploy
 ./deploy.sh
 ```
 
 ## Backup
 
 ```bash
-cd deploy/purefox
+cd /srv/image2api/deploy
 ./backup.sh
 ```
 
@@ -72,4 +84,4 @@ The backup archive contains `.env`, database dump, deployment templates, object/
 
 ## Notes
 
-RustFS runs as uid/gid `10001`; `deploy.sh` sets `data/rustfs` ownership accordingly. Do not change it back to root-only.
+RustFS runs as uid/gid `10001`; `deploy.sh` sets `$DATA_DIR/rustfs` ownership accordingly. Do not change it back to root-only.
