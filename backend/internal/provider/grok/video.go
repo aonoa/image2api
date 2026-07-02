@@ -71,7 +71,7 @@ func (c *Client) GenerateVideo(ctx context.Context, token, prompt, aspectRatio, 
 	// after only the conversation object — no progress events, no videoUrl. This
 	// is transient, so retry the whole create-post + stream a few times before
 	// giving up. Real out-of-credits / auth errors are returned immediately.
-	const maxAttempts = 3
+	const maxAttempts = 5
 	var (
 		postID   string
 		artifact string
