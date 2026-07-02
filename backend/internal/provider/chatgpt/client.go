@@ -28,6 +28,10 @@ var (
 	ErrAuth              = errors.New("chatgpt auth failed")
 	ErrQuotaExhausted    = errors.New("chatgpt quota exhausted")
 	ErrTemporaryUpstream = errors.New("chatgpt upstream temporary error")
+	// ErrContentPolicy marks a prompt rejected by ChatGPT's content audit. It is
+	// terminal and NOT retryable: the same prompt fails on every account, so the
+	// caller must fail fast rather than poll or fail over.
+	ErrContentPolicy = errors.New("chatgpt content policy rejection")
 )
 
 type Client struct {
@@ -94,7 +98,7 @@ func (c *Client) GenerateImage(ctx context.Context, accessToken, prompt, model, 
 	if err != nil {
 		return nil, nil, err
 	}
-	fileIDs, sedimentIDs, err = c.pollForImage(ctx, session, accessToken, conversationID, fileIDs, sedimentIDs, 180*time.Second)
+	fileIDs, sedimentIDs, err = c.pollForImage(ctx, session, accessToken, conversationID, fileIDs, sedimentIDs, pollBudget(ctx))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -791,6 +795,7 @@ func (c *Client) startImageGeneration(ctx context.Context, session tlsclient.Htt
 	defer resp.Body.Close()
 
 	conversationID := ""
+	asyncStarted := false
 	var fileIDs, sedimentIDs []string
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 8*1024*1024)
@@ -816,6 +821,18 @@ func (c *Client) startImageGeneration(ctx context.Context, session tlsclient.Htt
 		newFiles, newSeds := scanForIDs(payload)
 		fileIDs = mergeStrings(fileIDs, newFiles)
 		sedimentIDs = mergeStrings(sedimentIDs, newSeds)
+		if !asyncStarted && containsAsyncMarker(payload) {
+			asyncStarted = true
+		}
+		// Async pipeline: ChatGPT no longer streams the image inline — it returns
+		// a placeholder tool turn (image_gen_async / image_gen_task_id) and
+		// delivers the asset later via conversation polling. Once we have the
+		// conversation id there is nothing more to read here, so stop instead of
+		// holding the SSE open until [DONE] (a stalled stream would otherwise burn
+		// the whole generation budget and surface as "context deadline exceeded").
+		if asyncStarted && conversationID != "" {
+			break
+		}
 	}
 	if conversationID == "" {
 		joined := strings.Join(chunks, "\n")
@@ -856,6 +873,31 @@ func (c *Client) getConversation(ctx context.Context, session tlsclient.HttpClie
 	return payload, nil
 }
 
+// pollBudget derives how long to poll for the async image from the caller's
+// remaining context budget, leaving headroom to resolve+download the asset
+// before the outer deadline (genCtx, 8min) fires. Async image generation under
+// load routinely exceeds the old hard-coded 180s, which surfaced as
+// "image poll timeout"; tying the budget to the deadline lets slow gens finish
+// while the context still backstops a truly stuck request.
+func pollBudget(ctx context.Context) time.Duration {
+	const (
+		maxBudget = 6 * time.Minute
+		headroom  = 25 * time.Second
+	)
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return 3 * time.Minute
+	}
+	budget := time.Until(deadline) - headroom
+	if budget < 0 {
+		budget = 0
+	}
+	if budget > maxBudget {
+		budget = maxBudget
+	}
+	return budget
+}
+
 func (c *Client) pollForImage(ctx context.Context, session tlsclient.HttpClient, accessToken, conversationID string, initialFileIDs, initialSedimentIDs []string, timeout time.Duration) ([]string, []string, error) {
 	start := time.Now()
 	fileIDs := append([]string{}, initialFileIDs...)
@@ -885,6 +927,12 @@ func (c *Client) pollForImage(ctx context.Context, session tlsclient.HttpClient,
 		newFiles, newSeds := extractImageIDs(conv)
 		fileIDs = mergeStrings(fileIDs, newFiles)
 		sedimentIDs = mergeStrings(sedimentIDs, newSeds)
+		// Fail fast on a content-audit refusal: the assistant turn carries the
+		// rejection text and no image will ever land, so polling to timeout only
+		// wastes the whole budget. Only bail while we have no asset yet.
+		if len(fileIDs) == 0 && len(sedimentIDs) == 0 && conversationRejected(conv) {
+			return nil, nil, ErrContentPolicy
+		}
 		if len(fileIDs) > 0 || len(sedimentIDs) > 0 {
 			time.Sleep(2 * time.Second)
 			conv, err = c.getConversation(ctx, session, accessToken, conversationID)
