@@ -237,7 +237,7 @@ const sourcePill = (s) => ({
             <th class="text-center px-4 py-3 font-medium">预览</th>
             <th class="text-left px-4 py-3 font-medium">时间</th>
             <th class="text-left px-3 py-3 font-medium">状态</th>
-            <th class="text-left px-3 py-3 font-medium">用户</th>
+            <th class="text-left px-3 py-3 font-medium">用户 / 账号</th>
             <th class="text-left px-3 py-3 font-medium">模型</th>
             <th class="text-left px-3 py-3 font-medium">提示词 / 错误</th>
             <th class="text-left px-3 py-3 font-medium">参数</th>
@@ -280,6 +280,7 @@ const sourcePill = (s) => ({
             </td>
             <td class="px-3 py-3.5 align-middle min-w-0">
               <div class="text-xs text-white/80 truncate" :title="e.user_name || '匿名'">{{ e.user_name || '匿名' }}</div>
+              <div v-if="e.account" class="mt-0.5 text-[11px] text-white/45 truncate" :title="e.account">{{ e.account }}</div>
             </td>
             <td class="px-3 py-3.5 align-middle min-w-0">
               <div class="font-mono text-xs text-white/90 truncate" :title="e.model">{{ e.model }}</div>

@@ -194,6 +194,7 @@ const params = (e) => {
           <col class="w-16" />     <!-- preview -->
           <col class="w-28" />     <!-- time -->
           <col class="w-24" />     <!-- status -->
+          <col class="w-28" />     <!-- user/account -->
           <col class="w-36" />     <!-- model -->
           <col />                  <!-- prompt/error -->
           <col class="w-40" />     <!-- params -->
@@ -205,6 +206,7 @@ const params = (e) => {
             <th class="text-center px-3 py-3 font-medium">预览</th>
             <th class="text-left px-3 py-3 font-medium">时间</th>
             <th class="text-left px-3 py-3 font-medium">状态</th>
+            <th class="text-left px-3 py-3 font-medium">用户 / 账号</th>
             <th class="text-left px-3 py-3 font-medium">模型</th>
             <th class="text-left px-3 py-3 font-medium">提示词 / 错误</th>
             <th class="text-left px-3 py-3 font-medium">参数</th>
@@ -235,6 +237,10 @@ const params = (e) => {
               <span class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 whitespace-nowrap" :class="statusPill(e.status)">
                 <span class="w-1.5 h-1.5 rounded-full" :class="statusDot(e.status)"></span>{{ statusLabel(e.status) }}
               </span>
+            </td>
+            <td class="px-3 py-3 align-middle min-w-0">
+              <div class="text-xs text-slate-700 truncate" :title="e.user_name || '匿名'">{{ e.user_name || '匿名' }}</div>
+              <div v-if="e.account" class="mt-0.5 text-[11px] text-slate-400 truncate" :title="e.account">{{ e.account }}</div>
             </td>
             <td class="px-3 py-3 align-middle min-w-0">
               <div class="font-mono text-xs text-slate-800 truncate" :title="e.model">{{ e.model }}</div>

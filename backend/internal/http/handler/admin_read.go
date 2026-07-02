@@ -67,6 +67,13 @@ func (h *AdminReadHandler) Logs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to load logs"})
 		return
 	}
+	// Resolve account_id -> account label (email) so the log table can show which
+	// provider account fulfilled each generation under the user.
+	accountByID, err := h.admin.AccountNameMap(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to load logs"})
+		return
+	}
 	out := make([]gin.H, 0, len(items))
 	for _, item := range items {
 		var userName any
@@ -76,6 +83,14 @@ func (h *AdminReadHandler) Logs(c *gin.Context) {
 			userName = name
 		} else {
 			userName = item.UserID
+		}
+		var accountName any
+		if item.AccountID != "" {
+			if label, ok := accountByID[item.AccountID]; ok {
+				accountName = label
+			} else {
+				accountName = item.AccountID
+			}
 		}
 		out = append(out, gin.H{
 			"id":         item.ID,
@@ -92,6 +107,8 @@ func (h *AdminReadHandler) Logs(c *gin.Context) {
 			"source":     item.Source,
 			"user_id":    emptyStringNil(item.UserID),
 			"user_name":  userName,
+			"account_id": emptyStringNil(item.AccountID),
+			"account":    accountName,
 			"cost":       item.Cost,
 			"elapsed_ms": item.ElapsedMS,
 			"file":       emptyStringNil(item.File),

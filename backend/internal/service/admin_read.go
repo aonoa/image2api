@@ -136,6 +136,28 @@ func (s *AdminReadService) UserNameMap(ctx context.Context) (map[string]string, 
 	return out, nil
 }
 
+// AccountNameMap builds a token-account id -> display label lookup (account
+// email, else display name, else id) used to annotate log rows with which
+// provider account fulfilled each generation (event_logs.account_id).
+func (s *AdminReadService) AccountNameMap(ctx context.Context) (map[string]string, error) {
+	accounts, err := s.tokens.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(accounts))
+	for _, a := range accounts {
+		label := strings.TrimSpace(a.AccountEmail)
+		if label == "" {
+			label = strings.TrimSpace(a.AccountDisplayName)
+		}
+		if label == "" {
+			label = a.ID
+		}
+		out[a.ID] = label
+	}
+	return out, nil
+}
+
 func (s *AdminReadService) Stats(ctx context.Context) (map[string]any, error) {
 	stats, err := s.events.Stats(ctx)
 	if err != nil {
