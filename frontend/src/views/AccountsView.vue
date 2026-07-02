@@ -441,9 +441,6 @@ onMounted(loadAccounts)
                    case. -->
               <div class="flex items-center gap-2 min-w-0">
                 <span class="text-sm text-white/90 truncate" :title="a.email || '-'">{{ a.email || '-' }}</span>
-                <span v-if="a.team_id"
-                      class="shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-mono bg-violet-500/15 text-violet-300 ring-1 ring-violet-400/20"
-                      :title="'Runway team_id ' + a.team_id">{{ a.team_id }}</span>
                 <span v-if="a.image_limited && a.status !== 'quota'"
                       class="shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/15 text-amber-300 ring-1 ring-amber-400/20"
                       title="图片额度耗尽，仅视频可用">图片限额</span>
