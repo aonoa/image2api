@@ -365,7 +365,7 @@ func (h *UserGenerationHandler) catalogEntries(c *gin.Context) ([]gin.H, error) 
 			"ratios":               []string{"1:1", "16:9", "9:16", "4:3", "3:4"},
 			"resolutions":          []string{"1K"},
 			"image_to_image":       true,
-			"max_reference_images": 3,
+			"max_reference_images": 6,
 			"description":          "ChatGPT image generation",
 		},
 		{
