@@ -22,6 +22,25 @@ if [ ! -f .env ]; then
   exit 0
 fi
 
+require_env() {
+  key="$1"
+  val="$(grep -E "^${key}=" .env | tail -1 | cut -d= -f2-)"
+  if [ -z "$val" ]; then
+    echo "ERROR: .env 中缺少必填项: $key"
+    exit 1
+  fi
+  case "$val" in
+    change-me*|vividai|vividai-secret-change-me)
+      echo "ERROR: .env 中 $key 仍是示例弱值，请改成强随机值。"
+      exit 1
+      ;;
+  esac
+}
+
+require_env POSTGRES_PASSWORD
+require_env S3_ACCESS_KEY
+require_env S3_SECRET_KEY
+
 # --- backend binary (closed-source, shipped prebuilt) ---
 if [ ! -f backend/bin/api ]; then
   echo "ERROR: 缺少 backend/bin/api(后端二进制)。"
