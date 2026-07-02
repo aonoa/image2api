@@ -38,7 +38,16 @@ func (h *ImageHandler) Serve(c *gin.Context) {
 		return
 	}
 
-	public, err := h.imageAccess.IsPublic(c.Request.Context(), rel)
+	// A thumbnail shares its original's visibility, and old images without a
+	// stored thumb fall back to the original object.
+	origRel := rel
+	if service.IsThumbKey(rel) {
+		origRel = service.OrigKey(rel)
+	} else if service.IsLastFrameKey(rel) {
+		origRel = service.LastFrameOrigKey(rel)
+	}
+
+	public, err := h.imageAccess.IsPublic(c.Request.Context(), origRel)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to authorize image"})
 		return
@@ -64,6 +73,14 @@ func (h *ImageHandler) Serve(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"detail": "failed to fetch object"})
 		return
+	}
+	if resp.StatusCode == http.StatusNotFound && origRel != rel {
+		resp.Body.Close()
+		resp, err = h.store.Get(c.Request.Context(), origRel, c.GetHeader("Range"))
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"detail": "failed to fetch object"})
+			return
+		}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {

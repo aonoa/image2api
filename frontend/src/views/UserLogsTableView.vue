@@ -3,9 +3,9 @@
 // generations (success / failed / pending), surfacing failure reasons that the
 // image-only 记录 gallery hides. Uses the same /logs endpoint (auto-scoped to
 // the caller), just without the success-only filter.
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, generatedUrl } from '../api'
+import { api, generatedUrl, thumbUrl } from '../api'
 import { fmtDate, fmtClock, fmtTs } from '../utils/format'
 import { copyText } from '../utils/clipboard'
 import { points } from '../credits'
@@ -23,6 +23,9 @@ const search = ref('')
 const page = ref(1)
 const pageSize = 20
 const lightbox = ref(null)
+// Video rows whose first-frame thumbnail is missing (old videos) — fall back
+// to the muted <video> preview for those.
+const thumbFail = reactive({})
 
 const toast = ref('')
 let toastTimer = null
@@ -221,7 +224,8 @@ const params = (e) => {
                    (not a RustFS path), so it can't be previewed in-browser — show —. -->
               <button v-if="e.status === 'success' && e.file && !e.file.startsWith('http')" @click="lightbox = e"
                       class="block w-11 h-11 mx-auto rounded-lg overflow-hidden ring-1 ring-slate-200 hover:ring-fuchsia-300 transition-all">
-                <img v-if="e.kind !== 'video'" :src="generatedUrl(e.file)" loading="lazy" class="w-full h-full object-cover" />
+                <img v-if="e.kind !== 'video' || !thumbFail[e.id]" :src="thumbUrl(e.file)" loading="lazy" class="w-full h-full object-cover"
+                     @error="e.kind === 'video' && (thumbFail[e.id] = true)" />
                 <video v-else :src="generatedUrl(e.file)" muted preload="metadata" class="w-full h-full object-cover" />
               </button>
               <span v-else class="text-slate-300">—</span>

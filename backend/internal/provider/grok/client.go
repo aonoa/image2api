@@ -153,6 +153,14 @@ func (c *Client) FetchCreditsBalance(ctx context.Context, token string) (map[str
 		used = fullCredits
 	}
 	remaining := fullCredits - used
+
+	// 恢复时间: prefer the subscription's billing-period end (when the plan renews
+	// and credits reset) over the credits-config timestamp. Free accounts have no
+	// subscription, so this falls back to the credits-config reset above.
+	sub, _ := c.FetchSubscription(ctx, token)
+	if sub != nil && strings.TrimSpace(sub.BillingPeriodEnd) != "" {
+		reset = strings.TrimSpace(sub.BillingPeriodEnd)
+	}
 	return map[string]any{
 		"remaining":   remaining,
 		"used":        used,
@@ -161,6 +169,78 @@ func (c *Client) FetchCreditsBalance(ctx context.Context, token string) (map[str
 		"unknown":     false,
 		"error":       nil,
 	}, nil
+}
+
+// Subscription is the membership view parsed from GET /rest/subscriptions.
+type Subscription struct {
+	Member           bool   // an active subscription exists
+	Tier             string // e.g. SUBSCRIPTION_TIER_GROK_PRO ("" for free)
+	Status           string // e.g. SUBSCRIPTION_STATUS_ACTIVE
+	BillingPeriodEnd string // RFC3339; when the plan renews / credits reset
+	FreeTrial        bool   // currently in a free-trial offer
+}
+
+// FetchSubscription reads GET /rest/subscriptions and reports the account's
+// membership. An empty subscriptions array means a free account (Member=false).
+// A 401/403 maps to ErrAuth; other transport/HTTP errors are returned so callers
+// can treat them as best-effort (they already have the credit balance).
+func (c *Client) FetchSubscription(ctx context.Context, token string) (*Subscription, error) {
+	token = strings.TrimSpace(strings.TrimPrefix(token, "Bearer "))
+	if token == "" {
+		return nil, ErrAuth
+	}
+	client, err := c.newTLSClient()
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(http.MethodGet, apiBase+"/rest/subscriptions", nil)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	c.applyHeaders(req, token, nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrTemporaryUpstream, err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		return nil, ErrAuth
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("%w: subscriptions http %d", ErrTemporaryUpstream, resp.StatusCode)
+	}
+	var body struct {
+		Subscriptions []struct {
+			Tier             string `json:"tier"`
+			Status           string `json:"status"`
+			BillingPeriodEnd string `json:"billingPeriodEnd"`
+			ActiveOffer      struct {
+				FreeTrial *struct {
+					TrialDays int `json:"trialDays"`
+				} `json:"freeTrial"`
+			} `json:"activeOffer"`
+		} `json:"subscriptions"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, fmt.Errorf("%w: subscriptions non-json", ErrTemporaryUpstream)
+	}
+	out := &Subscription{}
+	// Pick the active subscription (fall back to the first entry) as the membership.
+	for i, s := range body.Subscriptions {
+		if i == 0 || strings.EqualFold(s.Status, "SUBSCRIPTION_STATUS_ACTIVE") {
+			out.Member = true
+			out.Tier = strings.TrimSpace(s.Tier)
+			out.Status = strings.TrimSpace(s.Status)
+			out.BillingPeriodEnd = strings.TrimSpace(s.BillingPeriodEnd)
+			out.FreeTrial = s.ActiveOffer.FreeTrial != nil
+			if strings.EqualFold(s.Status, "SUBSCRIPTION_STATUS_ACTIVE") {
+				break
+			}
+		}
+	}
+	return out, nil
 }
 
 // FetchSession reads the account profile via GET /api/auth/session and returns
@@ -271,21 +351,21 @@ func statsigID(path, method string) string {
 // extra overrides/adds per-request headers (e.g. content-type).
 func (c *Client) applyHeaders(req *http.Request, token string, extra map[string]string) {
 	h := http.Header{
-		"accept":            {"*/*"},
-		"accept-language":   {"en-US,en;q=0.9"},
-		"content-type":      {"application/json"},
-		"origin":            {origin},
-		"referer":           {origin + "/"},
-		"user-agent":        {userAgent},
-		"x-statsig-id":      {statsigID(req.URL.Path, req.Method)},
-		"x-xai-request-id":  {uuid.NewString()},
-		"sec-ch-ua":         {`"Chromium";v="133", "Not(A:Brand";v="99"`},
-		"sec-ch-ua-mobile":  {"?0"},
+		"accept":             {"*/*"},
+		"accept-language":    {"en-US,en;q=0.9"},
+		"content-type":       {"application/json"},
+		"origin":             {origin},
+		"referer":            {origin + "/"},
+		"user-agent":         {userAgent},
+		"x-statsig-id":       {statsigID(req.URL.Path, req.Method)},
+		"x-xai-request-id":   {uuid.NewString()},
+		"sec-ch-ua":          {`"Chromium";v="133", "Not(A:Brand";v="99"`},
+		"sec-ch-ua-mobile":   {"?0"},
 		"sec-ch-ua-platform": {`"Windows"`},
-		"sec-fetch-dest":    {"empty"},
-		"sec-fetch-mode":    {"cors"},
-		"sec-fetch-site":    {"same-origin"},
-		"cookie":            {"sso=" + token + "; sso-rw=" + token},
+		"sec-fetch-dest":     {"empty"},
+		"sec-fetch-mode":     {"cors"},
+		"sec-fetch-site":     {"same-origin"},
+		"cookie":             {"sso=" + token + "; sso-rw=" + token},
 	}
 	for k, v := range extra {
 		h[k] = []string{v}

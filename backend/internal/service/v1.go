@@ -515,6 +515,11 @@ func (s *V1Service) prepareImageExecution(ctx context.Context, principal *APIPri
 			_ = s.events.UpdateStatus(ctx, eventID, "failed", "storage upload failed: "+err.Error(), 0)
 			return nil, fmt.Errorf("%w: %v", ErrProviderExecution, err)
 		}
+		// Best-effort thumbnail for list views; the image serving route falls
+		// back to the original when the thumb object is missing.
+		if thumb, terr := makeThumbnail(imageBytes); terr == nil {
+			_ = s.store.Put(genCtx, ThumbKey(relativePath), thumb, "image/jpeg")
+		}
 	}
 	elapsedMS := int(time.Since(startedAt).Milliseconds())
 	if err := s.events.UpdateStatus(ctx, eventID, "success", "", elapsedMS); err != nil {
@@ -647,6 +652,17 @@ func (s *V1Service) prepareVideoExecution(ctx context.Context, principal *APIPri
 			_ = s.refundIfNeeded(ctx, principal, eventID, price)
 			_ = s.events.UpdateStatus(ctx, eventID, "failed", "storage upload failed: "+err.Error(), 0)
 			return nil, fmt.Errorf("%w: %v", ErrProviderExecution, err)
+		}
+		// Best-effort stills: first frame (downscaled) for list thumbnails and
+		// the full-res last frame for 首尾帧 continuation. Missing objects fall
+		// back to the video itself at serve time.
+		if thumb, last, terr := extractVideoFrames(genCtx, videoBytes); terr == nil {
+			if len(thumb) > 0 {
+				_ = s.store.Put(genCtx, ThumbKey(relativePath), thumb, "image/jpeg")
+			}
+			if len(last) > 0 {
+				_ = s.store.Put(genCtx, LastFrameKey(relativePath), last, "image/jpeg")
+			}
 		}
 	}
 	elapsedMS := int(time.Since(startedAt).Milliseconds())

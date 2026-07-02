@@ -331,9 +331,10 @@ func mapStatus(path string, status int, raw []byte) error {
 	switch {
 	case status == 200:
 		return nil
-	case status == 403 && strings.Contains(strings.ToLower(string(raw)), "anti-bot"):
-		// grok bot-detection (proxy/TLS fingerprint), NOT a dead token — transient,
-		// so a good account isn't killed by an IP/anti-bot hiccup.
+	case status == 403 && isBotChallenge(string(raw)):
+		// grok bot-detection or a Cloudflare challenge page ("Just a moment…"),
+		// NOT a dead token — transient, so a good account isn't killed by an
+		// IP/anti-bot hiccup.
 		return fmt.Errorf("%w: %s 403 %s", ErrTemporaryUpstream, path, clip(raw, 160))
 	case status == 401 || status == 403:
 		return fmt.Errorf("%w: %s %d %s", ErrAuth, path, status, clip(raw, 160))
@@ -353,6 +354,18 @@ func mapStatus(path string, status int, raw []byte) error {
 		}
 		return fmt.Errorf("grok: %s %d %s", path, status, clip(raw, 160))
 	}
+}
+
+// isBotChallenge reports whether a 403 body is an anti-bot interstitial rather
+// than a real auth rejection: grok's own "anti-bot" marker or a Cloudflare
+// challenge page ("Just a moment…" / cf-chl / challenge-platform).
+func isBotChallenge(s string) bool {
+	s = strings.ToLower(s)
+	return strings.Contains(s, "anti-bot") ||
+		strings.Contains(s, "just a moment") ||
+		strings.Contains(s, "cf-chl") ||
+		strings.Contains(s, "challenge-platform") ||
+		strings.Contains(s, "cf_chl")
 }
 
 func isCreditError(s string) bool {

@@ -1,7 +1,7 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, generatedUrl } from '../api'
+import { api, generatedUrl, thumbUrl } from '../api'
 import { fmtTs } from '../utils/format'
 import { copyText } from '../utils/clipboard'
 import Icon from '../components/Icon.vue'
@@ -97,6 +97,9 @@ async function copyPrompt(e) {
 
 const toast = ref('')
 const lightbox = ref(null)
+// Videos whose first-frame thumbnail is missing (old videos) — fall back to
+// the muted <video> preview for those cards.
+const thumbFail = reactive({})
 function onKey(e) { if (e.key === 'Escape') lightbox.value = null }
 
 onMounted(() => {
@@ -157,12 +160,18 @@ onUnmounted(() => {
            @click="(e.status === 'success' && e.file) && (lightbox = e)">
         <!-- media -->
         <template v-if="e.status === 'success' && e.file">
-          <video v-if="e.kind === 'video'" :src="generatedUrl(e.file)" muted loop preload="metadata"
+          <!-- first-frame still as background-image (same as image cards); the
+               hidden probe img flips to the <video> fallback for old videos. -->
+          <div v-if="e.kind === 'video' && !thumbFail[e.id]" :style="{ backgroundImage: `url(${thumbUrl(e.file)})` }"
+               class="absolute inset-0 w-full h-full bg-cover bg-center transition-transform duration-300 group-hover:scale-105">
+            <img :src="thumbUrl(e.file)" class="hidden" @error="thumbFail[e.id] = true" />
+          </div>
+          <video v-else-if="e.kind === 'video'" :src="generatedUrl(e.file)" muted loop preload="metadata"
                  class="absolute inset-0 w-full h-full object-cover"
                  @mouseenter="$event.target.play && $event.target.play()"
                  @mouseleave="$event.target.pause && $event.target.pause()" />
           <!-- background-image (not <img>) so Edge shows no 视觉搜索 overlay icon. -->
-          <div v-else :style="{ backgroundImage: `url(${generatedUrl(e.file)})` }"
+          <div v-else :style="{ backgroundImage: `url(${thumbUrl(e.file)})` }"
                class="absolute inset-0 w-full h-full bg-cover bg-center transition-transform duration-300 group-hover:scale-105"></div>
           <div class="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/85 via-black/40 to-transparent pointer-events-none"></div>
         </template>

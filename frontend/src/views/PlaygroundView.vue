@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, jsonBody, generatedUrl } from '../api'
 import { auth, refreshMe } from '../auth'
@@ -50,6 +50,9 @@ const history = ref([])
 const GATEWAY_TIMEOUT = new Set([0, 408, 504, 520, 521, 522, 523, 524, 525])
 const error = ref('')
 const lightbox = ref(null)
+// Videos whose first-frame thumbnail is missing (old videos) — fall back to
+// the muted <video> preview for those cards.
+const thumbFail = reactive({})
 const toast = ref('')
 let pollTimer = null
 
@@ -436,12 +439,31 @@ function lastFrameDataUrl(url) {
 // (frame) models only. Triggered by the small button; clicking the video zooms.
 async function useVideoFrame(item) {
   if (!item || !item.url) return
-  const dataUrl = await lastFrameDataUrl(item.url)
+  // Prefer the server-stored FULL-RES last-frame still; old videos without one
+  // fall back to grabbing the frame from the video via canvas.
+  const dataUrl = (await storedLastFrameDataUrl(item.url)) || (await lastFrameDataUrl(item.url))
   if (!dataUrl) { flash('截取末帧失败'); return }
   const ref = { name: 'frame', dataUrl }
   if (refImages.value.length === 0) refImages.value = [ref]
   else refImages.value.splice(0, 1, ref)   // replace the 首帧 slot
   flash('已把视频末帧设为首帧')
+}
+
+// Fetch the server-stored last-frame still (url + '.last.jpg'). The server
+// falls back to the ORIGINAL VIDEO when the still doesn't exist (old videos),
+// so verify the response really is an image before using it.
+async function storedLastFrameDataUrl(url) {
+  try {
+    const r = await fetch(url + '.last.jpg')
+    if (!r.ok || !(r.headers.get('content-type') || '').startsWith('image/')) return ''
+    const blob = await r.blob()
+    return await new Promise((res) => {
+      const fr = new FileReader()
+      fr.onload = () => res(fr.result)
+      fr.onerror = () => res('')
+      fr.readAsDataURL(blob)
+    })
+  } catch { return '' }
 }
 
 function onKey(e) { if (e.key === 'Escape') lightbox.value = null }
@@ -637,14 +659,21 @@ onUnmounted(() => {
              class="group relative rounded-xl overflow-hidden ring-1 ring-slate-200 bg-slate-100 aspect-[4/5]">
           <!-- done: media + caption -->
           <template v-if="item.status === 'done' && item.url">
-            <video v-if="item.kind === 'video'" :src="item.url" muted loop preload="metadata"
+            <!-- first-frame still as background-image (same as image cards); the
+                 hidden probe img flips to the <video> fallback for old videos. -->
+            <div v-if="item.kind === 'video' && !thumbFail[item.id]" @click="lightbox = item" title="点击播放"
+                 :style="{ backgroundImage: `url(${item.url}.thumb.jpg)` }"
+                 class="absolute inset-0 w-full h-full bg-cover bg-center cursor-zoom-in transition-transform duration-300 group-hover:scale-105">
+              <img :src="item.url + '.thumb.jpg'" class="hidden" @error="thumbFail[item.id] = true" />
+            </div>
+            <video v-else-if="item.kind === 'video'" :src="item.url" muted loop preload="metadata"
                    @click="lightbox = item" title="点击放大"
                    class="absolute inset-0 w-full h-full object-cover cursor-zoom-in"
                    @mouseenter="$event.target.play && $event.target.play()"
                    @mouseleave="$event.target.pause && $event.target.pause()" />
             <!-- background-image (not <img>) so Edge shows no 视觉搜索 overlay icon. -->
             <div v-else @click="lightbox = item" title="点击放大"
-                 :style="{ backgroundImage: `url(${item.url})` }"
+                 :style="{ backgroundImage: `url(${item.url}.thumb.jpg)` }"
                  class="absolute inset-0 w-full h-full bg-cover bg-center cursor-zoom-in transition-transform duration-300 group-hover:scale-105"></div>
             <div class="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/85 via-black/30 to-transparent pointer-events-none"></div>
             <!-- hover action: 上参考图. Image → use as reference; video → 末帧设为首帧
