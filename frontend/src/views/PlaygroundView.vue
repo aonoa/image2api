@@ -526,9 +526,9 @@ onUnmounted(() => {
       <div>
         <div class="flex items-center justify-between mb-1.5">
           <label class="block text-xs font-medium text-slate-500">提示词</label>
-          <span class="text-[11px] tabular-nums" :class="prompt.length >= 2000 ? 'text-rose-500' : 'text-slate-400'">{{ prompt.length }}/2000</span>
+          <span class="text-[11px] tabular-nums" :class="prompt.length >= 1500 ? 'text-rose-500' : 'text-slate-400'">{{ prompt.length }}/1500</span>
         </div>
-        <textarea v-model="prompt" rows="4" maxlength="2000" class="field resize-none disabled:opacity-60 disabled:cursor-not-allowed"
+        <textarea v-model="prompt" rows="4" maxlength="1500" class="field resize-none disabled:opacity-60 disabled:cursor-not-allowed"
                   placeholder="描述想要的画面…如：黄昏时分,金色麦田里奔跑的金毛猎犬,电影感"></textarea>
       </div>
 

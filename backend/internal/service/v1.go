@@ -38,7 +38,7 @@ var (
 	ErrInvalidAPIKey       = errors.New("invalid api key")
 	ErrUnknownModel        = errors.New("unknown model")
 	ErrUnsupportedParams   = errors.New("unsupported or unpriced parameters for this model")
-	ErrPromptTooLong       = errors.New("prompt too long (max 2000 characters)")
+	ErrPromptTooLong       = errors.New("prompt too long (max 1500 characters)")
 	ErrInsufficientFunds   = errors.New("insufficient credits")
 	ErrGenerationPending   = errors.New("generation executor not implemented yet")
 	ErrProviderAuth        = errors.New("provider token invalid or expired")
@@ -61,7 +61,7 @@ var (
 
 // maxPromptRunes caps prompt length (counted as characters, so Chinese = 1),
 // matching the 画图台 counter. Enforced for both 画图台 and API-key calls.
-const maxPromptRunes = 2000
+const maxPromptRunes = 1500
 
 // maxReferenceImageBytes bounds a single decoded reference image. 8 MB
 // comfortably covers real photos/screenshots; anything larger is almost
