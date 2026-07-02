@@ -78,6 +78,18 @@ const sizeTable = [
   { ratio: '1:3 · 竖',   k1: '512x1536',  k2: '768x2304',  k4: '1280x3840' },
 ]
 
+// ---- 视频 size → 比例 × 分辨率(720p / 1080p)----
+// 视频按「短边」判档:短边 <1080 → 720p,≥1080 → 1080p;宽高比映射比例。
+const videoSizeTable = [
+  { ratio: '16:9 · 横', p720: '1280x720', p1080: '1920x1080' },
+  { ratio: '9:16 · 竖', p720: '720x1280', p1080: '1080x1920' },
+  { ratio: '1:1 · 方',  p720: '720x720',  p1080: '1080x1080' },
+  { ratio: '4:3 · 横',  p720: '960x720',  p1080: '1440x1080' },
+  { ratio: '3:4 · 竖',  p720: '720x960',  p1080: '1080x1440' },
+  { ratio: '3:2 · 横',  p720: '1080x720', p1080: '1620x1080' },
+  { ratio: '2:3 · 竖',  p720: '720x1080', p1080: '1080x1620' },
+]
+
 // ---- examples (built in script so refs resolve correctly) ----
 const examples = computed(() => [
   {
@@ -331,10 +343,10 @@ async function copy(text) {
 
     <!-- size 对照表(课时表)—— 解决"传错分辨率" -->
     <section>
-      <h2 class="text-lg font-semibold mb-1">分辨率对照表 · <code class="text-white/70 text-sm">size</code> 该传什么</h2>
+      <h2 class="text-lg font-semibold mb-1">图像分辨率对照表 · <code class="text-white/70 text-sm">size</code> 该传什么</h2>
       <p class="text-xs text-white/45 mb-3">
         左边选比例,上面选分辨率档,交叉格里就是 <code class="text-white/70">size</code> 要传的值(直接复制)。
-        没有 <code class="text-white/70">quality</code> 参数,分辨率只看 <code class="text-white/70">size</code> 的长边。
+        没有 <code class="text-white/70">quality</code> 参数,图像分辨率只看 <code class="text-white/70">size</code> 的<strong class="text-white/70">长边</strong>。
         档位必须是该模型支持的(见上方「可用模型」的分辨率列),不支持会自动回退到该模型最低档。
       </p>
       <div class="card overflow-hidden">
@@ -358,6 +370,33 @@ async function copy(text) {
       <p class="text-xs text-white/40 mt-2">
         例:想要 <strong class="text-white/70">2K 的 16:9 横图</strong> → <code class="text-white/70">"size": "2048x1152"</code>。
         留空 size = 默认 <strong class="text-white/70">1:1 · 2K</strong>。
+      </p>
+
+      <!-- 视频分辨率(720p / 1080p,按短边判) -->
+      <h2 class="text-lg font-semibold mb-1 mt-8">视频分辨率对照表 · <code class="text-white/70 text-sm">size</code> 该传什么</h2>
+      <p class="text-xs text-white/45 mb-3">
+        视频用 <code class="text-white/70">720p</code> / <code class="text-white/70">1080p</code> 两档,只看 <code class="text-white/70">size</code> 的<strong class="text-white/70">短边</strong>(短边 ≥1080 = 1080p,否则 720p)。
+        档位必须是该视频模型支持的(如 grok-video 仅 720p),不支持会被拒。
+      </p>
+      <div class="card overflow-hidden">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-[11px] uppercase tracking-wider text-white/40 border-b border-white/[0.08]">
+            <th class="px-4 py-2.5 font-medium">比例</th>
+            <th class="px-4 py-2.5 font-medium">720p</th>
+            <th class="px-4 py-2.5 font-medium">1080p</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="row in videoSizeTable" :key="row.ratio" class="border-b border-white/[0.04] last:border-0">
+              <td class="px-4 py-2.5 text-white/75">{{ row.ratio }}</td>
+              <td class="px-4 py-2.5 font-mono text-white/85">{{ row.p720 }}</td>
+              <td class="px-4 py-2.5 font-mono text-white/85">{{ row.p1080 }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="text-xs text-white/40 mt-2">
+        例:想要 <strong class="text-white/70">720p 的 16:9 横版视频</strong> → <code class="text-white/70">"size": "1280x720"</code>;
+        竖版 9:16 → <code class="text-white/70">"720x1280"</code>。
       </p>
     </section>
 

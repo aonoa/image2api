@@ -524,8 +524,11 @@ onUnmounted(() => {
 
       <!-- prompt -->
       <div>
-        <label class="block text-xs font-medium text-slate-500 mb-1.5">提示词</label>
-        <textarea v-model="prompt" rows="4" class="field resize-none disabled:opacity-60 disabled:cursor-not-allowed"
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="block text-xs font-medium text-slate-500">提示词</label>
+          <span class="text-[11px] tabular-nums" :class="prompt.length >= 1500 ? 'text-rose-500' : 'text-slate-400'">{{ prompt.length }}/1500</span>
+        </div>
+        <textarea v-model="prompt" rows="4" maxlength="1500" class="field resize-none disabled:opacity-60 disabled:cursor-not-allowed"
                   placeholder="描述想要的画面…如：黄昏时分,金色麦田里奔跑的金毛猎犬,电影感"></textarea>
       </div>
 
@@ -646,7 +649,11 @@ onUnmounted(() => {
             <div class="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/85 via-black/30 to-transparent pointer-events-none"></div>
             <!-- hover action: 上参考图. Image → use as reference; video → 末帧设为首帧
                  (only shown when the model supports 首尾帧). Clicking the media zooms. -->
-            <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div class="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <a :href="item.url" :download="(item.url || '').split('/').pop()" @click.stop title="下载"
+                 class="w-7 h-7 rounded-lg bg-black/50 ring-1 ring-white/10 hover:bg-black/70 text-white grid place-items-center">
+                <Icon name="download" class="w-3.5 h-3.5" />
+              </a>
               <button v-if="item.kind === 'video' ? (refMode === 'frame' && maxRefs > 0) : (maxRefs > 0)"
                       @click.stop="item.kind === 'video' ? useVideoFrame(item) : useAsRef(item)"
                       :title="item.kind === 'video' ? '把末帧设为首帧' : '作为参考图'"

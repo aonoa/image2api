@@ -131,12 +131,17 @@ func (m *MaintenanceService) tick(ctx context.Context) {
 		log.Printf("maintenance: roll_reset: %v", err)
 	}
 
-	// 1b. Runway tokens have no refresh — once the JWT expiry (its reset marker)
-	//     passes, mark them dead directly instead of letting them 401 on next use.
-	if n, err := m.tokens.ExpireByReset(ctx, "runway"); err != nil {
-		log.Printf("maintenance: expire_runway: %v", err)
-	} else if n > 0 {
-		log.Printf("maintenance: expired %d runway token(s)", n)
+	// 1b. Runway/grok tokens have no refresh — once the reset marker passes, mark
+	//     them dead directly instead of letting them 401 on next use. Runway's
+	//     marker is the JWT expiry; grok's is the credits reset (grok sso can't be
+	//     renewed either — 失效就失效 — so a purchased short-lived account that has
+	//     lapsed by its reset time is treated as dead rather than re-scheduled).
+	for _, pool := range []string{"runway", "grok"} {
+		if n, err := m.tokens.ExpireByReset(ctx, pool); err != nil {
+			log.Printf("maintenance: expire_%s: %v", pool, err)
+		} else if n > 0 {
+			log.Printf("maintenance: expired %d %s token(s)", n, pool)
+		}
 	}
 
 	// 1c. Proactively renew krea/imagine sessions ~10min before expiry so a

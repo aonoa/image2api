@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="frontend/public/favicon.svg" width="84" alt="Vivid AI" />
+
 <h1>image2api</h1>
 
 **Multi-provider AI image / video generation gateway — one OpenAI-compatible API, seven platforms aggregated, a ready-to-run operations system**
@@ -14,7 +16,7 @@
 [![Vue 3](https://img.shields.io/badge/Vue-3-42b883?logo=vuedotjs&logoColor=white)](https://vuejs.org)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](#-deployment)
 [![OpenAI Compatible](https://img.shields.io/badge/OpenAI-compatible-412991?logo=openai&logoColor=white)](#-openai-compatible-api)
-[![HTTPS](https://img.shields.io/badge/HTTPS-acme.sh%20auto--issue-success)](#option-1-docker-one-command-recommended)
+[![HTTPS](https://img.shields.io/badge/HTTPS-your--proxy-lightgrey)](#-deployment)
 [![Providers](https://img.shields.io/badge/providers-7-orange)](#-supported-models--providers)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-yes-success)](#-deployment)
 [![License](https://img.shields.io/badge/license-MIT-blue)](#-license)
@@ -51,27 +53,44 @@ It's more than an API proxy: it ships with **credit billing, CDK top-ups, referr
 
 > 💡 Both frontend and backend are **fully open-source** (MIT) — Go + Vue 3, free to fork and self-host.
 
-**At a glance** 🔌 OpenAI-compatible · 🤖 7 platforms, 10+ models · 🔁 auto failover / token keep-alive · 💳 credits + agent pricing · 🎨 generation frontend + admin console · 🐳 one-command deploy + auto HTTPS
+**At a glance** 🔌 OpenAI-compatible · 🤖 7 platforms, 10+ models · 🔁 auto failover / token keep-alive · 💳 credits + agent pricing · 🎨 generation frontend + admin console · 🐳 one-command deploy (bring your own TLS proxy)
 
 ## 🖼️ Screenshots
 
-| Playground | Dashboard |
-|:---:|:---:|
-| ![Playground](docs/screenshots/playground.png) | ![Dashboard](docs/screenshots/dashboard.png) |
-| **Accounts** | **Logs** |
-| ![Accounts](docs/screenshots/accounts.png) | ![Logs](docs/screenshots/logs.png) |
+<div align="center">
+<sub>🎨 Modern generation frontend · light / dark admin console · data-driven ops dashboard</sub>
+</div>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/dashboard.png" alt="Dashboard" /></td>
+    <td width="50%"><img src="docs/screenshots/models.png" alt="Models" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>📊 Dashboard</b><br/><sub>Users / volume / provider health / 24h trend</sub></td>
+    <td align="center"><b>🧩 Model management</b><br/><sub>Per-model capabilities, pricing & weight</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/accounts.png" alt="Accounts" /></td>
+    <td width="50%"><img src="docs/screenshots/logs.png" alt="Logs" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>🔑 Account pools</b><br/><sub>Multi-account pools · weight / concurrency · CRUD</sub></td>
+    <td align="center"><b>📜 Call logs</b><br/><sub>Success / failure / in-progress · prompts & latency</sub></td>
+  </tr>
+</table>
 
 ## 🚀 Features
 
 #### 🎨 Generation
 - Images + videos in one place, with **image-to-image / reference frames** (first frame, last frame, style reference)
-- Multiple resolutions (1K / 2K / 4K), aspect ratios and video durations — configured and priced per model
+- Multiple resolutions (images 1K / 2K / 4K · videos 720p / 1080p), aspect ratios and video durations — configured and priced per model
 - 7 providers, 10+ models, **enable / disable / re-price from the admin console**, no code changes
 
 #### 🔌 OpenAI Compatible
 - Text-to-image `/v1/images/generations` · image-to-image `/v1/images/edits` (multipart ref upload) · video `/v1/videos` (Sora-style async: create → poll → `/content`) · `/v1/models`
-- **Strict OpenAI params**: `size` sets the aspect ratio, `quality` the resolution tier — just swap `base_url` + `api_key` into an existing OpenAI SDK
-- Image results returned **inline as base64** — nothing stored server-side, privacy-friendly
+- **Strict OpenAI params**: `size` drives **both aspect ratio + resolution tier** (images by long edge → 1K/2K/4K, videos by short edge → 720p/1080p) — just swap `base_url` + `api_key` into an existing OpenAI SDK
+- Image results returned **inline as base64** — nothing stored server-side, privacy-friendly; the in-app **/docs** ships a size ↔ tier reference table
 
 #### 🔁 Account Pools + Smart Failover
 - Round-robin scheduling across the pool; one bad account doesn't break the whole
@@ -86,18 +105,21 @@ It's more than an API proxy: it ships with **credit billing, CDK top-ups, referr
 #### 💳 Billing & Operations
 - Credit-based (**pre-deduct + refund on failure**), priced per model / resolution / duration
 - **Agent pricing**: a user can be set as an "agent" role and models can carry agent prices; agent users (including their API key calls) are billed at the agent price, falling back to the normal price when unset
+- **Online top-up (易支付 / epay)**: WeChat / Alipay QR, preset + custom amounts, unpaid orders auto-cancel after 30 min, MD5-verified idempotent callback auto-credits; cumulative top-up tracked
 - **CDK redeem codes** · **referral rewards** · email sign-up / verification code / password reset
+- **Concurrency groups**: cap a user's simultaneous generations (playground + API key combined, `0` = unlimited), self-healing Redis counters, new users auto-join the default group
 - Three roles: regular user / agent / admin (single)
 
 #### 🖥️ User Frontend (Vue 3)
 - Playground · creations gallery · generation logs (with failure reasons / source tags)
-- API docs · API key management · referral · about, light / dark theme
+- **Top-up · Orders** (recharge history / resume unpaid) · API docs · API key management · referral · about, light / dark theme
+- **In-app announcements**: a Markdown notice pops up after login and re-shows whenever its content changes
 
 #### 🛠️ Admin Console
 - Overview dashboard (trends / DAU / top failures / top spenders)
-- Model management (normal + agent price) · account management (bulk import / dedup / quota) · site-wide logs · user management (set as agent) · CDK · showcase · site config
+- Model management (normal + agent price) · account management (bulk import / dedup / quota) · **concurrency groups** · **order management** (filter / search / paginate) · site-wide logs · user management (set as agent / assign concurrency group / view cumulative top-up) · CDK · showcase · **announcements** · site config (incl. epay)
 
-**🧰 Engineering highlights**: tls-client (Chrome JA3/JA4 fingerprint) reliably passes Cloudflare · media stored in S3/RustFS, served through an authenticated proxy with retention cleanup · self-healing maintenance loop (quota recovery / credential refresh / orphan-job cleanup with refunds) · one-command Docker deploy with acme.sh auto HTTPS.
+**🧰 Engineering highlights**: tls-client (Chrome JA3/JA4 fingerprint) reliably passes Cloudflare · media stored in S3/RustFS, served through an authenticated proxy with retention cleanup · self-healing maintenance loop (quota recovery / credential refresh / orphan-job cleanup with refunds) · one-command Docker deploy (TLS via your own reverse proxy).
 
 ## 🤖 Supported Models / Providers
 
@@ -116,15 +138,14 @@ It's more than an API proxy: it ships with **credit billing, CDK top-ups, referr
 ## 🔌 OpenAI-Compatible API
 
 ```bash
-# Text-to-image — pure OpenAI params: size→aspect ratio, quality→tier (low/medium/high→1K/2K/4K)
+# Text-to-image — pure OpenAI params: size drives both aspect ratio + tier (long edge <1800→1K / <3500→2K / ≥3500→4K)
 curl https://your-domain/v1/images/generations \
   -H "Authorization: Bearer sk-xxxx" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-image-2",
     "prompt": "a cute cat on a desk, studio lighting",
-    "size": "1024x1024",
-    "quality": "high"
+    "size": "2048x2048"
   }'
 
 # Image-to-image — multipart reference upload (multiple via image[])
@@ -137,27 +158,11 @@ Images return OpenAI-style `{ "created": ..., "data": [{ "b64_json": "..." }] }`
 
 ## 🚀 Deployment
 
-Both frontend and backend are open-source. Docker one-command is recommended; you can also build from source with **Go 1.26+**.
+> Domain + HTTPS are handled by your own reverse proxy (this project issues no certificates).
 
-> Prerequisite: a domain A-record pointing to this host, with **ports 80 / 443 open to the internet** (required for Let's Encrypt verification).
+**Docker (recommended)**: `docker compose up -d --build` brings up PostgreSQL + Redis + RustFS + backend + frontend (nginx serving **HTTP on container port 2000**); point your reverse proxy at `http://<host>:2000` (port via `WEB_PORT`; edit the values (passwords / keys / `CORS_ORIGINS`, and `COOKIE_SECURE=true` when your proxy serves HTTPS) directly in `docker-compose.yml`).
 
-### Option 1: Docker, one command (recommended)
-
-Requires Docker + Docker Compose. A single command brings up Postgres + Redis + RustFS + backend + frontend, and **auto-issues / renews the HTTPS certificate** (built-in acme.sh).
-
-```bash
-cp .env.docker.example .env   # fill in DOMAIN / ACME_EMAIL / POSTGRES_PASSWORD / S3_SECRET_KEY
-sh install.sh                 # = docker compose up -d --build
-```
-
-Open `https://<your-domain>/`; watch cert progress with `docker compose logs -f acme`. With `DOMAIN=localhost` a self-signed cert is used (local testing).
-
-<details>
-<summary><b>Option 2: Manual install</b> — bring your own PostgreSQL / Redis / RustFS / Nginx (click to expand)</summary>
-
-<br/>
-
-Provide your own **PostgreSQL · Redis · RustFS (or any S3) · Nginx**, **Go 1.26+** for the backend and **Node 18+** for the frontend.
+Or **build from source** — bring your own **PostgreSQL · Redis · RustFS (or any S3) · reverse proxy**:
 
 ```bash
 # 1. Create an empty database (the backend auto-migrates on start)
@@ -214,7 +219,7 @@ server {
 |---|---|
 | Backend | Go · gin · gorm (PostgreSQL) · go-redis · tls-client (Chrome fingerprint) |
 | Frontend | Vue 3 · Vue Router · Vite · Tailwind CSS v4 |
-| Infrastructure | PostgreSQL · Redis · RustFS (S3-compatible) · Nginx · acme.sh |
+| Infrastructure | PostgreSQL · Redis · RustFS (S3-compatible) · Nginx |
 
 ## 📦 Repository Layout
 
@@ -238,8 +243,10 @@ backend/                       Backend source (Go)
 │   │   ├── grok/              Grok (grok.com, spoofed statsig, video)
 │   │   ├── leonardo/          Leonardo
 │   │   ├── krea/              Krea
-│   │   └── imagine/           Imagine.art
-│   ├── repo/                  Data-access layer (users / models / accounts / logs / CDK…)
+│   │   ├── imagine/           Imagine.art
+│   │   ├── custom/            Custom upstream (OpenAI-compatible v1, routed by id)
+│   │   └── epay/              易支付 / epay (mapi order + MD5-verified callback, top-ups)
+│   ├── repo/                  Data-access layer (users / models / accounts / logs / CDK / orders / concurrency groups…)
 │   ├── service/               Business logic (scheduling, billing, account pools, keep-alive, maintenance)
 │   └── storage/               RustFS / S3 media storage
 ├── Dockerfile                 Multi-stage build (compile source → slim runtime image)
@@ -247,17 +254,15 @@ backend/                       Backend source (Go)
 
 frontend/                      Frontend source (Vue 3 + Vite)
 ├── src/
-│   ├── views/                 Pages (playground / accounts / models / logs / overview / users…)
+│   ├── views/                 Pages (playground / accounts / models / users / concurrency / orders / logs / overview / top-up / settings…)
 │   ├── components/            Reusable components (modals / selectors / lightbox…)
 │   ├── layouts/               Public / admin layouts
 │   ├── utils/                 Utility functions
 │   └── api.js · auth.js …     API client, auth, theme, credits, etc.
-├── Dockerfile                 Nginx static hosting + cert watcher
+├── Dockerfile                 Nginx static hosting (HTTP :2000) + API proxy
 └── default.conf.template      Nginx site template (reverse proxy + caching)
 
-docker-compose.yml             Docker orchestration (Postgres / Redis / RustFS / backend / frontend / acme)
-install.sh                     One-command deploy script (= docker compose up -d --build)
-.env.docker.example            Deployment env-var template
+docker-compose.yml             Docker orchestration (Postgres / Redis / RustFS / backend / frontend)
 ```
 
 ## 🗺️ Roadmap

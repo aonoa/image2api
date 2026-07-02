@@ -32,6 +32,12 @@ async function copyPrompt(e) {
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => (toast.value = ''), 1800)
 }
+async function copyError(e) {
+  if (!e.error) return
+  toast.value = (await copyText(e.error)) ? '错误已复制' : '复制失败'
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => (toast.value = ''), 1800)
+}
 
 // 来源筛选走服务端:画图台 = source "user",API = source "v1"。
 const SOURCE_PARAM = { web: 'user', api: 'v1' }
@@ -246,7 +252,9 @@ const params = (e) => {
                    :class="e.prompt ? 'cursor-pointer hover:text-slate-900' : ''"
                    :title="e.prompt ? '点击复制提示词' : ''"
                    @click="e.prompt && copyPrompt(e)">{{ e.prompt || '—' }}</div>
-              <div v-if="e.error" class="mt-1 text-[11px] text-rose-600 truncate" :title="e.error">⚠ {{ e.error }}</div>
+              <div v-if="e.error" class="mt-1 text-[11px] text-rose-600 truncate cursor-pointer hover:text-rose-700 transition-colors"
+                   :title="e.error + ' — 点击复制'"
+                   @click.stop="copyError(e)">⚠ {{ e.error }}</div>
             </td>
             <td class="px-3 py-3 align-middle text-xs text-slate-500 tabular-nums">{{ params(e) || '—' }}</td>
             <td class="px-3 py-3 align-middle text-right text-xs text-slate-700 tabular-nums">{{ e.cost ? points(e.cost) : '—' }}</td>

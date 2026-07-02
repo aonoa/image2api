@@ -25,6 +25,12 @@ async function copyPrompt(e) {
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => (toast.value = ''), 1800)
 }
+async function copyError(e) {
+  if (!e.error) return
+  toast.value = (await copyText(e.error)) ? '错误已复制' : '复制失败'
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => (toast.value = ''), 1800)
+}
 
 async function load() {
   loading.value = true
@@ -294,8 +300,9 @@ const sourcePill = (s) => ({
                    :class="e.prompt ? 'cursor-pointer hover:text-white' : ''"
                    :title="e.prompt ? '点击复制提示词' : ''"
                    @click="e.prompt && copyPrompt(e)">{{ e.prompt || '—' }}</div>
-              <div v-if="e.error" class="mt-1 text-[11px] text-rose-300/85 truncate flex items-center gap-1.5" :title="e.error">
-                <Icon name="close" class="w-3 h-3 shrink-0" />
+              <div v-if="e.error" class="mt-1 text-[11px] text-rose-300/85 truncate flex items-center gap-1.5 cursor-pointer hover:text-rose-200 transition-colors"
+                   :title="e.error + ' — 点击复制'"
+                   @click.stop="copyError(e)">
                 {{ e.error }}
               </div>
             </td>

@@ -1,9 +1,10 @@
 # image2api — one-command stack: PostgreSQL + Redis + RustFS (S3) + backend
-# (pre-built binary, closed-source — backend/bin/api ships with the repo) +
-# frontend/nginx (open-source, built here).
-#   1) cp .env.docker.example .env   # 填 DOMAIN / ACME_EMAIL / 密码 / 密钥
-#   2) docker compose up -d --build  (或 sh install.sh)
-# Then open https://<DOMAIN>/  (nginx serves the SPA, proxies the API, TLS via acme.sh).
+# (built from source) + frontend/nginx (HTTP only on port 2000 by default).
+#   1) cp .env.docker.example .env
+#   2) fill strong POSTGRES_PASSWORD, S3_ACCESS_KEY, and S3_SECRET_KEY
+#   3) docker compose --env-file .env up -d --build
+# TLS + domain are handled by your own reverse proxy in front of the web
+# container. Do not expose production with the example/empty secrets.
 services:
   postgres:
     image: postgres:16-alpine
@@ -81,8 +82,10 @@ services:
       RUSTFS_BUCKET: ${S3_BUCKET:-vivid-ai}
       RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
       RUSTFS_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
-      CORS_ORIGINS: https://${DOMAIN:-localhost}
-      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      # Set to the URL your reverse proxy serves the site on (comma-separated).
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:2000}
+      # true only if your reverse proxy serves HTTPS; false for plain HTTP.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     volumes:
       - generated:/app/data/generated
     depends_on:
@@ -102,61 +105,12 @@ services:
   web:
     build:
       context: ./frontend
-    environment:
-      DOMAIN: ${DOMAIN:-localhost}
-      # Only substitute ${DOMAIN} in the nginx template — leave $host/$uri/etc.
-      NGINX_ENVSUBST_FILTER: DOMAIN
+    # nginx serves the SPA + proxies the API on container port 2000 (HTTP only).
+    # Point your own reverse proxy at host:2000.
     ports:
-      - "${HTTP_PORT:-80}:80"
-      - "${HTTPS_PORT:-443}:443"
-    volumes:
-      - certs:/etc/nginx/certs
-      - acme_webroot:/var/www/acme
+      - "${WEB_PORT:-2000}:2000"
     depends_on:
       - backend
-    restart: unless-stopped
-
-  # acme.sh — issues + auto-renews the Let's Encrypt cert via http-01 (webroot
-  # shared with nginx) into the shared certs volume. nginx's cert-watch reloads
-  # it. Requires DOMAIN to resolve to this host and ports 80/443 reachable.
-  acme:
-    image: neilpang/acme.sh:latest
-    depends_on:
-      - web
-    environment:
-      DOMAIN: ${DOMAIN:-localhost}
-      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
-      # Persist account + cert state here (a volume on /acme.sh would shadow the
-      # installed binary, so use a separate config-home).
-      LE_CONFIG_HOME: /acme-data
-    volumes:
-      - certs:/etc/nginx/certs
-      - acme_webroot:/var/www/acme
-      - acmedata:/acme-data
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -e
-        D="$${DOMAIN:-localhost}"
-        # Skip ACME for non-public domains (localhost / bare IP) — the self-signed
-        # bootstrap cert keeps 443 working for local testing.
-        case "$$D" in
-          localhost|127.0.0.1|"") echo "acme: DOMAIN=$$D not public, skipping issuance"; exec tail -f /dev/null ;;
-        esac
-        mkdir -p /etc/nginx/certs/live/$$D /var/www/acme /acme-data
-        acme.sh --set-default-ca --server letsencrypt
-        acme.sh --register-account -m "$${ACME_EMAIL}" || true
-        # Retry the first issue until nginx :80 is reachable for the http-01 check.
-        i=0
-        while [ $$i -lt 10 ]; do
-          if acme.sh --issue -d "$$D" -w /var/www/acme --keylength ec-256; then break; fi
-          i=$$((i+1)); echo "acme: issue attempt $$i failed, retry in 30s"; sleep 30
-        done
-        acme.sh --install-cert -d "$$D" --ecc \
-          --key-file       /etc/nginx/certs/live/$$D/privkey.pem \
-          --fullchain-file /etc/nginx/certs/live/$$D/fullchain.pem || true
-        # daemon: renew checks daily; renewals auto-reinstall to the paths above.
-        while true; do sleep 12h; acme.sh --cron || true; done
     restart: unless-stopped
 
 volumes:
@@ -164,6 +118,3 @@ volumes:
   redisdata:
   rustfsdata:
   generated:
-  certs:
-  acme_webroot:
-  acmedata:

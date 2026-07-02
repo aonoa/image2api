@@ -1,23 +1,30 @@
 // Package grok implements the Grok (grok.com / xAI) provider client. Auth is the
 // website "sso" session cookie (a JWT whose only claim is a session_id — no exp,
 // no refresh: when the session dies upstream the account is simply dead, never
-// renewed). grok.com gates requests with an x-statsig-id header; the web app's
-// value is just a base64-encoded fake JS TypeError string, which the upstream
-// accepts — so we spoof it the same way (no Cloudflare clearance needed). Uses
-// tls-client so the JA3/JA4 fingerprint matches Chrome.
+// renewed). grok.com gates requests with an x-statsig-id header; its value
+// is a 70-byte anti-bot record — header[49] | counter_le32 |
+// sha256("METHOD!path!counter"+suffix)[:16] | trailer — XOR-masked with one
+// random byte and base64-encoded; we reproduce it exactly in statsigID (the
+// build-specific header/suffix/trailer are env-overridable when grok rotates
+// them). Uses tls-client so the JA3/JA4 fingerprint matches Chrome.
 package grok
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"math/rand/v2"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	http "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
@@ -197,37 +204,88 @@ func (c *Client) FetchSession(ctx context.Context, token string) (email, userID 
 	return strings.TrimSpace(body.Session.Email), strings.TrimSpace(body.Session.UserID), nil
 }
 
-// statsigID mirrors grok2api's _statsig_id: base64 of a fake JS TypeError string.
-// The upstream's anti-bot check accepts this spoofed value.
-func statsigID() string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 5)
-	for i := range b {
-		b[i] = charset[rand.IntN(len(charset))]
+// statsig challenge constants for the current grok.com web build. They rotate
+// when grok ships a new build; override at runtime via env vars
+// (GROK_STATSIG_HEADER_HEX / GROK_STATSIG_SUFFIX / GROK_STATSIG_TRAILER).
+// statsigEpoch is the challenge epoch (2023-05-01 00:00 UTC).
+const (
+	statsigEpoch          = 1682924400
+	defaultStatsigHeader  = "00e1ebcb2cac08f42039de1eb4d8534da581482fd09ccc95e06e3f03a3e9ddde02eb50b70c2efeaec6401f5d9b5ed329d4"
+	defaultStatsigSuffix  = "obfiowerehiring4fa399100100"
+	defaultStatsigTrailer = 3
+)
+
+var (
+	statsigHeader  = resolveStatsigHeader()
+	statsigSuffix  = envOr("GROK_STATSIG_SUFFIX", defaultStatsigSuffix)
+	statsigTrailer = resolveStatsigTrailer()
+)
+
+func resolveStatsigHeader() []byte {
+	h := envOr("GROK_STATSIG_HEADER_HEX", defaultStatsigHeader)
+	b, err := hex.DecodeString(h)
+	if err != nil || len(b) != 49 {
+		b, _ = hex.DecodeString(defaultStatsigHeader)
 	}
-	msg := fmt.Sprintf("x1:TypeError: Cannot read properties of null (reading 'children['%s']')", string(b))
-	return base64.StdEncoding.EncodeToString([]byte(msg))
+	return b
+}
+
+func resolveStatsigTrailer() byte {
+	if v := strings.TrimSpace(os.Getenv("GROK_STATSIG_TRAILER")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 255 {
+			return byte(n)
+		}
+	}
+	return defaultStatsigTrailer
+}
+
+func envOr(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return def
+}
+
+// statsigID reproduces grok.com's x-statsig-id anti-bot token for a request. The
+// token binds to the request METHOD and URL path and to a coarse timestamp, so
+// it must be regenerated per request. See the package doc for the layout.
+func statsigID(path, method string) string {
+	counter := uint32(time.Now().Unix() - statsigEpoch)
+	sig := fmt.Sprintf("%s!%s!%d%s", method, path, counter, statsigSuffix)
+	hash := sha256.Sum256([]byte(sig))
+
+	raw := make([]byte, 0, 70)
+	raw = append(raw, statsigHeader...)
+	raw = binary.LittleEndian.AppendUint32(raw, counter)
+	raw = append(raw, hash[:16]...)
+	raw = append(raw, statsigTrailer)
+
+	key := byte(rand.IntN(256))
+	for i := range raw {
+		raw[i] ^= key
+	}
+	return base64.RawStdEncoding.EncodeToString(raw)
 }
 
 // applyHeaders sets the browser-like header set + sso cookie + spoofed statsig id.
 // extra overrides/adds per-request headers (e.g. content-type).
 func (c *Client) applyHeaders(req *http.Request, token string, extra map[string]string) {
 	h := http.Header{
-		"accept":            {"*/*"},
-		"accept-language":   {"en-US,en;q=0.9"},
-		"content-type":      {"application/json"},
-		"origin":            {origin},
-		"referer":           {origin + "/"},
-		"user-agent":        {userAgent},
-		"x-statsig-id":      {statsigID()},
-		"x-xai-request-id":  {uuid.NewString()},
-		"sec-ch-ua":         {`"Chromium";v="133", "Not(A:Brand";v="99"`},
-		"sec-ch-ua-mobile":  {"?0"},
+		"accept":             {"*/*"},
+		"accept-language":    {"en-US,en;q=0.9"},
+		"content-type":       {"application/json"},
+		"origin":             {origin},
+		"referer":            {origin + "/"},
+		"user-agent":         {userAgent},
+		"x-statsig-id":       {statsigID(req.URL.Path, req.Method)},
+		"x-xai-request-id":   {uuid.NewString()},
+		"sec-ch-ua":          {`"Chromium";v="133", "Not(A:Brand";v="99"`},
+		"sec-ch-ua-mobile":   {"?0"},
 		"sec-ch-ua-platform": {`"Windows"`},
-		"sec-fetch-dest":    {"empty"},
-		"sec-fetch-mode":    {"cors"},
-		"sec-fetch-site":    {"same-origin"},
-		"cookie":            {"sso=" + token + "; sso-rw=" + token},
+		"sec-fetch-dest":     {"empty"},
+		"sec-fetch-mode":     {"cors"},
+		"sec-fetch-site":     {"same-origin"},
+		"cookie":             {"sso=" + token + "; sso-rw=" + token},
 	}
 	for k, v := range extra {
 		h[k] = []string{v}
@@ -243,7 +301,9 @@ func (c *Client) applyHeaders(req *http.Request, token string, extra map[string]
 
 func (c *Client) newTLSClient() (tlsclient.HttpClient, error) {
 	options := []tlsclient.HttpClientOption{
-		tlsclient.WithTimeoutSeconds(120),
+		// Video generation streams inline until progress=100; a 15s clip can take
+		// several minutes, so allow up to 10m (caller's genCtx caps at 12m).
+		tlsclient.WithTimeoutSeconds(600),
 		tlsclient.WithClientProfile(profiles.Chrome_133),
 		tlsclient.WithRandomTLSExtensionOrder(),
 	}

@@ -1,43 +1,16 @@
-# nginx for the docker stack. ${DOMAIN} is filled at container start (envsubst,
-# limited to DOMAIN via NGINX_ENVSUBST_FILTER). Port 80 serves the ACME
-# http-01 challenge and redirects everything else to HTTPS; port 443 serves the
-# SPA + reverse-proxies the API. Certs come from the shared volume, issued/renewed
-# by the acme.sh sidecar (a self-signed cert bootstraps 443 before the real one).
-
-# ---- 80: ACME challenge + redirect to HTTPS ----
+# nginx for the docker stack — HTTP only on :2000. TLS + domain are handled by
+# the user's OWN reverse proxy placed in front of this container; this just serves
+# the SPA and reverse-proxies the API to the backend.
 server {
-    listen 80;
-    listen [::]:80;
-    server_name ${DOMAIN};
-
-    # acme.sh writes http-01 challenge files here (shared volume).
-    location ^~ /.well-known/acme-challenge/ {
-        root /var/www/acme;
-        default_type "text/plain";
-    }
-    location / {
-        return 301 https://$host$request_uri;
-    }
-}
-
-# ---- 443: the app ----
-server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2 on;
-    server_name ${DOMAIN};
-
-    ssl_certificate     /etc/nginx/certs/live/${DOMAIN}/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/live/${DOMAIN}/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_session_cache shared:SSL:10m;
+    listen 2000;
+    listen [::]:2000;
+    server_name _;
 
     root /usr/share/nginx/html;
     index index.html;
 
     client_max_body_size 50m;
 
-    # Proxy headers (inherited by all proxy_pass locations below).
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -61,12 +34,10 @@ server {
     }
 
     # ---- API / media / health -> backend ----
-    # 动态 API no-store,防止 CDN 缓存 GET 响应(如 managed-models)→ 改价不生效。
     location ^~ /admin/api/ { proxy_pass http://backend:6666; add_header Cache-Control "no-store" always; }
     location ^~ /images/    { proxy_pass http://backend:6666; }
     location = /health      { proxy_pass http://backend:6666; }
-
-    # /v1 is per-API-key authenticated — must NOT be cached by any CDN/proxy.
+    # /v1 is per-API-key authenticated — never cache.
     location ^~ /v1/ {
         proxy_pass http://backend:6666;
         add_header Cache-Control "no-store" always;

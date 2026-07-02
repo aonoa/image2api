@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 # image2api — one-command install (Docker). Run from the repo root:
 #   sh install.sh
-# Brings up Postgres + Redis + RustFS + backend + frontend, and auto-issues a
-# Let's Encrypt HTTPS certificate via the built-in acme.sh service.
+# Brings up Postgres + Redis + RustFS + backend + frontend. The web container
+# serves HTTP on WEB_PORT; put your own reverse proxy in front for domain/TLS.
 set -e
 cd "$(dirname "$0")"
 
@@ -12,12 +12,24 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
+compose() {
+  if docker compose version >/dev/null 2>&1; then
+    docker compose --env-file .env "$@"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    docker-compose --env-file .env "$@"
+  else
+    echo "ERROR: 未安装 Docker Compose。请先安装 Docker Compose。"
+    exit 1
+  fi
+}
+
 # --- env file ---
 if [ ! -f .env ]; then
   echo "==> 生成 .env(从 .env.docker.example),请按提示编辑后重跑"
   cp .env.docker.example .env
   echo
-  echo "    必填:DOMAIN(你的域名)、ACME_EMAIL(证书邮箱)、POSTGRES_PASSWORD、S3_SECRET_KEY"
+  echo "    必填:POSTGRES_PASSWORD、S3_ACCESS_KEY、S3_SECRET_KEY"
+  echo "    反代域名/TLS 请在外部 Nginx/Caddy 配置，并同步设置 CORS_ORIGINS / COOKIE_SECURE"
   echo "    编辑好后再次执行:  sh install.sh"
   exit 0
 fi
@@ -41,21 +53,12 @@ require_env POSTGRES_PASSWORD
 require_env S3_ACCESS_KEY
 require_env S3_SECRET_KEY
 
-# --- backend binary (closed-source, shipped prebuilt) ---
-if [ ! -f backend/bin/api ]; then
-  echo "ERROR: 缺少 backend/bin/api(后端二进制)。"
-  echo "       请从 Releases 下载 linux/amd64 的 api 放到 backend/bin/api 后重试。"
-  exit 1
-fi
-chmod +x backend/bin/api 2>/dev/null || true
-
 # --- up ---
-echo "==> docker compose up -d --build"
-docker compose up -d --build
+echo "==> docker compose --env-file .env up -d --build"
+compose up -d --build
 
-DOMAIN_VAL="$(grep -E '^DOMAIN=' .env | head -1 | cut -d= -f2-)"
+WEB_PORT_VAL="$(grep -E '^WEB_PORT=' .env | head -1 | cut -d= -f2-)"
 echo
-echo "完成 ✅  打开 https://${DOMAIN_VAL:-<你的域名>}/"
-echo "证书签发进度: docker compose logs -f acme"
-echo "后端日志:     docker compose logs -f backend"
-echo "停止:         docker compose down"
+echo "完成。默认本机访问: http://localhost:${WEB_PORT_VAL:-2000}/"
+echo "后端日志: docker compose --env-file .env logs -f backend"
+echo "停止:     docker compose --env-file .env down"

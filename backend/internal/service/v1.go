@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"strconv"
 
@@ -37,6 +38,7 @@ var (
 	ErrInvalidAPIKey       = errors.New("invalid api key")
 	ErrUnknownModel        = errors.New("unknown model")
 	ErrUnsupportedParams   = errors.New("unsupported or unpriced parameters for this model")
+	ErrPromptTooLong       = errors.New("prompt too long (max 1500 characters)")
 	ErrInsufficientFunds   = errors.New("insufficient credits")
 	ErrGenerationPending   = errors.New("generation executor not implemented yet")
 	ErrProviderAuth        = errors.New("provider token invalid or expired")
@@ -56,6 +58,10 @@ var (
 	ErrVideoJobNotFound = errors.New("video job not found")
 	ErrVideoNotReady    = errors.New("video is not ready yet")
 )
+
+// maxPromptRunes caps prompt length (counted as characters, so Chinese = 1),
+// matching the 画图台 counter. Enforced for both 画图台 and API-key calls.
+const maxPromptRunes = 1500
 
 // maxReferenceImageBytes bounds a single decoded reference image. 8 MB
 // comfortably covers real photos/screenshots; anything larger is almost
@@ -82,7 +88,7 @@ type V1Service struct {
 	// refresh re-mints an Adobe access token from its cookie when a request hits a
 	// 401 mid-flight (set via SetRefresh — wired after construction to avoid an
 	// init cycle). nil for deployments without cookie refresh.
-	refresh  *RefreshProfileService
+	refresh *RefreshProfileService
 
 	// tokenCursors holds one strict round-robin cursor per pool (key: pool name,
 	// value: *uint64). Each pick advances the pool's cursor by one so accounts
@@ -182,9 +188,9 @@ type APIPrincipal struct {
 }
 
 type V1ImageRequest struct {
-	Model           string
-	Prompt          string
-	Size            string
+	Model  string
+	Prompt string
+	Size   string
 	// Quality is OpenAI's image quality (low|medium|high|auto). For our tiered
 	// models it selects the resolution (low→1K, medium→2K, high→4K, auto→default),
 	// clamped to whatever tiers the model actually prices. Only used when
@@ -939,6 +945,9 @@ func (s *V1Service) prepareImage(ctx context.Context, principal *APIPrincipal, i
 	if modelID == "" || prompt == "" {
 		return nil, "", "", 0, errors.New("model and prompt required")
 	}
+	if utf8.RuneCountInString(prompt) > maxPromptRunes {
+		return nil, "", "", 0, ErrPromptTooLong
+	}
 	modelItem, err := s.models.Get(ctx, modelID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1001,6 +1010,9 @@ func (s *V1Service) prepareVideo(ctx context.Context, principal *APIPrincipal, i
 	duration := strings.TrimSpace(in.Duration)
 	if modelID == "" || prompt == "" {
 		return nil, "", "", "", 0, errors.New("model and prompt required")
+	}
+	if utf8.RuneCountInString(prompt) > maxPromptRunes {
+		return nil, "", "", "", 0, ErrPromptTooLong
 	}
 	if duration == "" {
 		return nil, "", "", "", 0, errors.New("duration required")
@@ -1266,12 +1278,12 @@ const maxTempDeadAccounts = 3
 //     fresh token; if it still auth-fails (or there's nothing to refresh, e.g.
 //     chatgpt's JWT IS the credential), mark the account and fail over.
 //   - 上游临时 temporary → behavior depends on tempAsDead:
-//       • tempAsDead=false (default): retry the SAME account up to
-//         maxSameAccountAttempts times (not counted); if still failing, STOP
-//         (no fan-out — an upstream-wide blip fails identically everywhere).
-//       • tempAsDead=true (adobe): BAN the account (mark dead/disabled) and fail
-//         over to the next account, capped at maxTempDeadAccounts accounts so a
-//         pool-wide blip can't kill everything. Dead accounts don't auto-recover.
+//   - tempAsDead=false (default): retry the SAME account up to
+//     maxSameAccountAttempts times (not counted); if still failing, STOP
+//     (no fan-out — an upstream-wide blip fails identically everywhere).
+//   - tempAsDead=true (adobe): BAN the account (mark dead/disabled) and fail
+//     over to the next account, capped at maxTempDeadAccounts accounts so a
+//     pool-wide blip can't kill everything. Dead accounts don't auto-recover.
 //   - 参数错 / request-level (anything else) → return immediately, no retry, no
 //     account penalty (the account isn't at fault).
 //

@@ -159,14 +159,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 
         <!-- quick actions, hover-revealed; same style as 首页内容 -->
         <div class="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <a :href="generatedUrl(f.name)" target="_blank" @click.stop title="新标签打开"
-             class="w-7 h-7 rounded-lg bg-black/50 ring-1 ring-white/10 hover:bg-black/70 text-white grid place-items-center">
-            <Icon name="open" class="w-3.5 h-3.5" />
-          </a>
-          <button @click.stop="copyLink(f.name)" title="复制链接"
-             class="w-7 h-7 rounded-lg bg-black/50 ring-1 ring-white/10 hover:bg-black/70 text-white grid place-items-center">
-            <Icon name="copy" class="w-3.5 h-3.5" />
-          </button>
           <a :href="generatedUrl(f.name)" :download="f.name.split('/').pop()" @click.stop title="下载"
              class="w-7 h-7 rounded-lg bg-black/50 ring-1 ring-white/10 hover:bg-black/70 text-white grid place-items-center">
             <Icon name="download" class="w-3.5 h-3.5" />
