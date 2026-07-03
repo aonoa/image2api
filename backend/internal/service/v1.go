@@ -14,7 +14,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"strconv"
 
@@ -38,7 +37,6 @@ var (
 	ErrInvalidAPIKey       = errors.New("invalid api key")
 	ErrUnknownModel        = errors.New("unknown model")
 	ErrUnsupportedParams   = errors.New("unsupported or unpriced parameters for this model")
-	ErrPromptTooLong       = errors.New("prompt too long (max 1500 characters)")
 	ErrInsufficientFunds   = errors.New("insufficient credits")
 	ErrGenerationPending   = errors.New("generation executor not implemented yet")
 	ErrProviderAuth        = errors.New("provider token invalid or expired")
@@ -58,10 +56,6 @@ var (
 	ErrVideoJobNotFound = errors.New("video job not found")
 	ErrVideoNotReady    = errors.New("video is not ready yet")
 )
-
-// maxPromptRunes caps prompt length (counted as characters, so Chinese = 1),
-// matching the 画图台 counter. Enforced for both 画图台 and API-key calls.
-const maxPromptRunes = 1500
 
 // maxReferenceImageBytes bounds a single decoded reference image. 8 MB
 // comfortably covers real photos/screenshots; anything larger is almost
@@ -521,6 +515,11 @@ func (s *V1Service) prepareImageExecution(ctx context.Context, principal *APIPri
 			_ = s.events.UpdateStatus(ctx, eventID, "failed", "storage upload failed: "+err.Error(), 0)
 			return nil, fmt.Errorf("%w: %v", ErrProviderExecution, err)
 		}
+		// Best-effort thumbnail for list views; the image serving route falls
+		// back to the original when the thumb object is missing.
+		if thumb, terr := makeThumbnail(imageBytes); terr == nil {
+			_ = s.store.Put(genCtx, ThumbKey(relativePath), thumb, "image/jpeg")
+		}
 	}
 	elapsedMS := int(time.Since(startedAt).Milliseconds())
 	if err := s.events.UpdateStatus(ctx, eventID, "success", "", elapsedMS); err != nil {
@@ -653,6 +652,17 @@ func (s *V1Service) prepareVideoExecution(ctx context.Context, principal *APIPri
 			_ = s.refundIfNeeded(ctx, principal, eventID, price)
 			_ = s.events.UpdateStatus(ctx, eventID, "failed", "storage upload failed: "+err.Error(), 0)
 			return nil, fmt.Errorf("%w: %v", ErrProviderExecution, err)
+		}
+		// Best-effort stills: first frame (downscaled) for list thumbnails and
+		// the full-res last frame for 首尾帧 continuation. Missing objects fall
+		// back to the video itself at serve time.
+		if thumb, last, terr := extractVideoFrames(genCtx, videoBytes); terr == nil {
+			if len(thumb) > 0 {
+				_ = s.store.Put(genCtx, ThumbKey(relativePath), thumb, "image/jpeg")
+			}
+			if len(last) > 0 {
+				_ = s.store.Put(genCtx, LastFrameKey(relativePath), last, "image/jpeg")
+			}
 		}
 	}
 	elapsedMS := int(time.Since(startedAt).Milliseconds())
@@ -945,9 +955,6 @@ func (s *V1Service) prepareImage(ctx context.Context, principal *APIPrincipal, i
 	if modelID == "" || prompt == "" {
 		return nil, "", "", 0, errors.New("model and prompt required")
 	}
-	if utf8.RuneCountInString(prompt) > maxPromptRunes {
-		return nil, "", "", 0, ErrPromptTooLong
-	}
 	modelItem, err := s.models.Get(ctx, modelID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -988,6 +995,10 @@ func (s *V1Service) prepareImage(ctx context.Context, principal *APIPrincipal, i
 	// an explicit resolution; the OpenAI /v1 path derives it from size. There is no
 	// `quality` param — size is the single source of truth for resolution.
 	aspectRatio, resolution := parseImageSize(in.Size, in.AspectRatio, in.Resolution)
+	// Snap to the nearest ratio the model actually supports — a `size`-derived
+	// ratio (e.g. 1:3) must never be passed through to an upstream that rejects
+	// it (Runway 400s on ratios outside its list).
+	aspectRatio = snapRatio(aspectRatio, repo.JSONStrings(modelItem.Ratios))
 	// parseImageSize defaults a blank resolution to "2K" (OpenAI-size parity).
 	// For a model that doesn't price that tier — e.g. gpt-image-2 is 1K-only —
 	// fall back to its first supported tier so a missing/stale resolution from
@@ -1010,9 +1021,6 @@ func (s *V1Service) prepareVideo(ctx context.Context, principal *APIPrincipal, i
 	duration := strings.TrimSpace(in.Duration)
 	if modelID == "" || prompt == "" {
 		return nil, "", "", "", 0, errors.New("model and prompt required")
-	}
-	if utf8.RuneCountInString(prompt) > maxPromptRunes {
-		return nil, "", "", "", 0, ErrPromptTooLong
 	}
 	if duration == "" {
 		return nil, "", "", "", 0, errors.New("duration required")
@@ -1262,10 +1270,10 @@ const maxSameAccountAttempts = 3
 // may run (grok tolerates 10, unlike the 1-per-account default elsewhere).
 const grokConcurrencyPerAccount = 10
 
-// maxTempDeadAccounts caps how many accounts the "temporary error = dead account"
-// policy (tempAsDead, used by adobe) is allowed to mark dead + fail over before
-// giving up, so an upstream-wide blip ("system under load") can't nuke the whole
-// pool. After this many accounts fail this way, the request fails.
+// maxTempDeadAccounts caps how many accounts the "temporary error = fail over"
+// policy (tempFailover, used by adobe) may burn per request before giving up, so
+// an upstream-wide blip ("system under load") can't fan a single request out
+// across the whole pool. After this many accounts fail this way, the request fails.
 const maxTempDeadAccounts = 3
 
 // runPoolWithFailover drives a generation across a round-robin-ordered account
@@ -1277,13 +1285,14 @@ const maxTempDeadAccounts = 3
 //   - 认证失效 auth → refresh the token from its cookie and retry ONCE with the
 //     fresh token; if it still auth-fails (or there's nothing to refresh, e.g.
 //     chatgpt's JWT IS the credential), mark the account and fail over.
-//   - 上游临时 temporary → behavior depends on tempAsDead:
-//   - tempAsDead=false (default): retry the SAME account up to
+//   - 上游临时 temporary → behavior depends on tempFailover:
+//   - tempFailover=false (default): retry the SAME account up to
 //     maxSameAccountAttempts times (not counted); if still failing, STOP
 //     (no fan-out — an upstream-wide blip fails identically everywhere).
-//   - tempAsDead=true (adobe): BAN the account (mark dead/disabled) and fail
-//     over to the next account, capped at maxTempDeadAccounts accounts so a
-//     pool-wide blip can't kill everything. Dead accounts don't auto-recover.
+//   - tempFailover=true (adobe): fail over to the next account WITHOUT
+//     penalizing this one (rate-limit/overload isn't the account's fault),
+//     capped at maxTempDeadAccounts accounts so a pool-wide blip can't fan
+//     a single request out across everything.
 //   - 参数错 / request-level (anything else) → return immediately, no retry, no
 //     account penalty (the account isn't at fault).
 //
@@ -1296,7 +1305,7 @@ func (s *V1Service) runPoolWithFailover(ctx context.Context, eventID, pool strin
 	attempt func(token model.TokenAccount) ([]byte, error),
 	classify func(error) (isAuth, isQuota, isTemporary bool),
 	refreshOnAuth func(tokenID string) (model.TokenAccount, bool),
-	tempAsDead bool,
+	tempFailover bool,
 ) ([]byte, error) {
 	var lastErr error
 	busy := 0
@@ -1310,16 +1319,16 @@ func (s *V1Service) runPoolWithFailover(ctx context.Context, eventID, pool strin
 		// release via defer so a panic in tryAccount can't leak the 1-job slot.
 		data, err, failover, tempDead := func() ([]byte, error, bool, bool) {
 			defer s.acctRelease(ctx, token.ID, eventID)
-			return s.tryAccount(ctx, eventID, pool, token, kind, attempt, classify, refreshOnAuth, tempAsDead)
+			return s.tryAccount(ctx, eventID, pool, token, kind, attempt, classify, refreshOnAuth, tempFailover)
 		}()
 		if err == nil {
 			return data, nil
 		}
 		lastErr = err
 		if tempDead {
-			// temp-as-dead policy: this account was marked dead for a temporary
-			// upstream error. Cap how many accounts that can burn before we stop,
-			// so an upstream-wide blip doesn't wipe the whole pool.
+			// temp-failover policy: this account hit a temporary upstream error.
+			// Cap how many accounts one request may burn before we stop, so an
+			// upstream-wide blip doesn't fan out across the whole pool.
 			tempDeadCount++
 			if tempDeadCount >= maxTempDeadAccounts {
 				return nil, lastErr
@@ -1350,7 +1359,7 @@ func (s *V1Service) tryAccount(ctx context.Context, eventID, pool string, token 
 	attempt func(token model.TokenAccount) ([]byte, error),
 	classify func(error) (isAuth, isQuota, isTemporary bool),
 	refreshOnAuth func(tokenID string) (model.TokenAccount, bool),
-	tempAsDead bool,
+	tempFailover bool,
 ) ([]byte, error, bool, bool) {
 	_ = s.events.SetAccount(ctx, eventID, token.ID)
 	_ = s.tokens.TouchLastUsed(ctx, token.ID)
@@ -1384,15 +1393,13 @@ func (s *V1Service) tryAccount(ctx context.Context, eventID, pool string, token 
 			return nil, err, true, false
 		}
 		if isTemp {
-			if tempAsDead {
+			if tempFailover {
 				// Ops policy (adobe): a temporary upstream error ("system under
-				// load" etc.) BANS this account — mark it dead/disabled and fail
-				// over to the next account. The pool driver caps how many accounts
-				// this is allowed to burn per request (maxTempDeadAccounts). Note:
-				// dead accounts do NOT auto-recover — they need a manual re-enable.
+				// load" / rate-limit) is NOT the account's fault — record the
+				// failure but keep the account active, and fail over to the next
+				// account. The pool driver caps how many accounts one request may
+				// burn this way (maxTempDeadAccounts).
 				_, _ = s.tokens.Update(ctx, pool, token.ID, map[string]any{
-					"status":       "disabled",
-					"dead":         true,
 					"last_used_at": time.Now(),
 					"fail_total":   gorm.Expr("fail_total + 1"),
 					"fails":        gorm.Expr("fails + 1"),
@@ -1455,9 +1462,9 @@ func (s *V1Service) generateAdobeImage(ctx context.Context, eventID string, mode
 		return nil, err
 	}
 
-	// Round-robin order. Adobe uses tempAsDead=true: a temporary upstream error
-	// ("system under load") marks the account dead (like a 401) and fails over to
-	// the next account, capped at maxTempDeadAccounts; auth/quota also fail over
+	// Round-robin order. Adobe uses tempFailover=true: a temporary upstream error
+	// ("system under load") fails over to the next account without penalizing the
+	// current one, capped at maxTempDeadAccounts; auth/quota also fail over
 	// (see runPoolWithFailover).
 	return s.runPoolWithFailover(ctx, eventID, "adobe", active, "image", func(token model.TokenAccount) ([]byte, error) {
 		var blobIDs []string
@@ -1518,8 +1525,8 @@ func (s *V1Service) generateAdobeVideo(ctx context.Context, eventID string, mode
 	referenceMode := defaultString(strings.TrimSpace(modelItem.ReferenceMode), "frame")
 
 	// Round-robin order; same-account retry on transient errors, fail over to the
-	// next account on auth/quota; temporary upstream errors mark the account dead
-	// and fail over too (tempAsDead, capped at maxTempDeadAccounts). videoURL is
+	// next account on auth/quota; temporary upstream errors fail over too without
+	// penalizing the account (tempFailover, capped at maxTempDeadAccounts). videoURL is
 	// captured from the successful attempt's meta (the upstream presigned URL).
 	var videoURL string
 	data, err := s.runPoolWithFailover(ctx, eventID, "adobe", active, "video", func(token model.TokenAccount) ([]byte, error) {
@@ -2636,18 +2643,54 @@ func parseImageSize(size, aspectRatio, resolution string) (string, string) {
 	return ar, rs
 }
 
+// snapRatio returns the entry in supported closest in value to ar ("W:H").
+// ar is returned as-is when it's already supported, unparsable, or the model
+// has no ratio list.
+func snapRatio(ar string, supported []string) string {
+	parse := func(s string) (float64, bool) {
+		var w, h int
+		if _, err := fmt.Sscanf(strings.TrimSpace(s), "%d:%d", &w, &h); err != nil || w <= 0 || h <= 0 {
+			return 0, false
+		}
+		return float64(w) / float64(h), true
+	}
+	v, ok := parse(ar)
+	if !ok || len(supported) == 0 {
+		return ar
+	}
+	best, bestDelta := "", 0.0
+	for _, s := range supported {
+		if strings.TrimSpace(strings.ReplaceAll(s, "x", ":")) == ar {
+			return ar
+		}
+		sv, sok := parse(strings.ReplaceAll(s, "x", ":"))
+		if !sok {
+			continue
+		}
+		if d := absFloat(v - sv); best == "" || d < bestDelta {
+			best, bestDelta = strings.TrimSpace(strings.ReplaceAll(s, "x", ":")), d
+		}
+	}
+	if best == "" {
+		return ar
+	}
+	return best
+}
+
 func guessRatio(w, h int) string {
 	type candidate struct {
 		W int
 		H int
 	}
-	// The 14 ratios actually used across our models. Must stay in sync with the
+	// The 17 ratios actually used across our models. Must stay in sync with the
 	// custom-model picker (CustomModelModal RATIO_OPTS) and the docs 对照表, so a
-	// /v1 `size` maps to exactly one of them.
+	// /v1 `size` maps to exactly one of them. 9:21 is intentionally absent —
+	// no image provider accepts it (Runway 400s on it). snapRatio then clamps
+	// the guess to the target model's own supported list.
 	candidates := []candidate{
 		{1, 1},
-		{5, 4}, {4, 3}, {3, 2}, {16, 9}, {2, 1}, {21, 9}, {3, 1}, // 横
-		{4, 5}, {3, 4}, {2, 3}, {9, 16}, {9, 21}, {1, 3}, // 竖
+		{5, 4}, {4, 3}, {3, 2}, {16, 9}, {2, 1}, {21, 9}, {3, 1}, {4, 1}, {8, 1}, // 横
+		{4, 5}, {3, 4}, {2, 3}, {9, 16}, {1, 3}, {1, 4}, {1, 8}, // 竖
 	}
 	best := candidates[0]
 	bestDelta := absFloat(float64(w)/float64(h) - float64(best.W)/float64(best.H))

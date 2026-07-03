@@ -3,9 +3,9 @@
 // generations (success / failed / pending), surfacing failure reasons that the
 // image-only 记录 gallery hides. Uses the same /logs endpoint (auto-scoped to
 // the caller), just without the success-only filter.
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, generatedUrl } from '../api'
+import { api, generatedUrl, thumbUrl } from '../api'
 import { fmtDate, fmtClock, fmtTs } from '../utils/format'
 import { copyText } from '../utils/clipboard'
 import { points } from '../credits'
@@ -23,6 +23,9 @@ const search = ref('')
 const page = ref(1)
 const pageSize = 20
 const lightbox = ref(null)
+// Video rows whose first-frame thumbnail is missing (old videos) — fall back
+// to the muted <video> preview for those.
+const thumbFail = reactive({})
 
 const toast = ref('')
 let toastTimer = null
@@ -194,6 +197,7 @@ const params = (e) => {
           <col class="w-16" />     <!-- preview -->
           <col class="w-28" />     <!-- time -->
           <col class="w-24" />     <!-- status -->
+          <col class="w-28" />     <!-- user/account -->
           <col class="w-36" />     <!-- model -->
           <col />                  <!-- prompt/error -->
           <col class="w-40" />     <!-- params -->
@@ -205,6 +209,7 @@ const params = (e) => {
             <th class="text-center px-3 py-3 font-medium">预览</th>
             <th class="text-left px-3 py-3 font-medium">时间</th>
             <th class="text-left px-3 py-3 font-medium">状态</th>
+            <th class="text-left px-3 py-3 font-medium">用户 / 账号</th>
             <th class="text-left px-3 py-3 font-medium">模型</th>
             <th class="text-left px-3 py-3 font-medium">提示词 / 错误</th>
             <th class="text-left px-3 py-3 font-medium">参数</th>
@@ -219,7 +224,8 @@ const params = (e) => {
                    (not a RustFS path), so it can't be previewed in-browser — show —. -->
               <button v-if="e.status === 'success' && e.file && !e.file.startsWith('http')" @click="lightbox = e"
                       class="block w-11 h-11 mx-auto rounded-lg overflow-hidden ring-1 ring-slate-200 hover:ring-fuchsia-300 transition-all">
-                <img v-if="e.kind !== 'video'" :src="generatedUrl(e.file)" loading="lazy" class="w-full h-full object-cover" />
+                <img v-if="e.kind !== 'video' || !thumbFail[e.id]" :src="thumbUrl(e.file)" loading="lazy" class="w-full h-full object-cover"
+                     @error="e.kind === 'video' && (thumbFail[e.id] = true)" />
                 <video v-else :src="generatedUrl(e.file)" muted preload="metadata" class="w-full h-full object-cover" />
               </button>
               <span v-else class="text-slate-300">—</span>
@@ -235,6 +241,10 @@ const params = (e) => {
               <span class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 whitespace-nowrap" :class="statusPill(e.status)">
                 <span class="w-1.5 h-1.5 rounded-full" :class="statusDot(e.status)"></span>{{ statusLabel(e.status) }}
               </span>
+            </td>
+            <td class="px-3 py-3 align-middle min-w-0">
+              <div class="text-xs text-slate-700 truncate" :title="e.user_name || '匿名'">{{ e.user_name || '匿名' }}</div>
+              <div v-if="e.account" class="mt-0.5 text-[11px] text-slate-400 truncate" :title="e.account">{{ e.account }}</div>
             </td>
             <td class="px-3 py-3 align-middle min-w-0">
               <div class="font-mono text-xs text-slate-800 truncate" :title="e.model">{{ e.model }}</div>

@@ -1,9 +1,9 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { api } from '../api'
 import { fmtTs, fmtDate, fmtClock } from '../utils/format'
 import { copyText } from '../utils/clipboard'
-import { generatedUrl } from '../api'
+import { generatedUrl, thumbUrl } from '../api'
 import Icon from '../components/Icon.vue'
 import MediaLightbox from '../components/MediaLightbox.vue'
 
@@ -106,6 +106,10 @@ function fmtWhen(ts) {
   if (!ts) return '—'
   return fmtTs(ts)
 }
+
+// Video rows whose first-frame thumbnail is missing (old videos) — fall back
+// to the muted <video> preview for those.
+const thumbFail = reactive({})
 
 const previewing = ref(null)   // entry whose generated file is open in the lightbox
 function openPreview(e) {
@@ -237,7 +241,7 @@ const sourcePill = (s) => ({
             <th class="text-center px-4 py-3 font-medium">预览</th>
             <th class="text-left px-4 py-3 font-medium">时间</th>
             <th class="text-left px-3 py-3 font-medium">状态</th>
-            <th class="text-left px-3 py-3 font-medium">用户</th>
+            <th class="text-left px-3 py-3 font-medium">用户 / 账号</th>
             <th class="text-left px-3 py-3 font-medium">模型</th>
             <th class="text-left px-3 py-3 font-medium">提示词 / 错误</th>
             <th class="text-left px-3 py-3 font-medium">参数</th>
@@ -251,8 +255,9 @@ const sourcePill = (s) => ({
               <button v-if="e.status === 'success' && e.file && e.source !== 'v1'"
                       @click="openPreview(e)"
                       class="block w-12 h-12 mx-auto rounded-lg overflow-hidden ring-1 ring-white/10 hover:ring-fuchsia-400/60 transition-all">
-                <img v-if="e.kind !== 'video'" :src="generatedUrl(e.file)" loading="lazy"
-                     class="w-full h-full object-cover" />
+                <img v-if="e.kind !== 'video' || !thumbFail[e.id]" :src="thumbUrl(e.file)" loading="lazy"
+                     class="w-full h-full object-cover"
+                     @error="e.kind === 'video' && (thumbFail[e.id] = true)" />
                 <video v-else :src="generatedUrl(e.file)" muted loop preload="metadata" playsinline
                        class="w-full h-full object-cover"
                        @mouseenter="$event.target.play && $event.target.play()"
@@ -280,6 +285,7 @@ const sourcePill = (s) => ({
             </td>
             <td class="px-3 py-3.5 align-middle min-w-0">
               <div class="text-xs text-white/80 truncate" :title="e.user_name || '匿名'">{{ e.user_name || '匿名' }}</div>
+              <div v-if="e.account" class="mt-0.5 text-[11px] text-white/45 truncate" :title="e.account">{{ e.account }}</div>
             </td>
             <td class="px-3 py-3.5 align-middle min-w-0">
               <div class="font-mono text-xs text-white/90 truncate" :title="e.model">{{ e.model }}</div>

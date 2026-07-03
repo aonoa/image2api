@@ -51,3 +51,9 @@ export async function fetchHealth() {
 export function generatedUrl(name) {
   return `${BASE}/images/${name}`
 }
+
+/** Small thumbnail URL for list views. The server falls back to the original
+ * when no thumbnail object exists (old images), so this is always safe. */
+export function thumbUrl(name) {
+  return `${BASE}/images/${name}.thumb.jpg`
+}

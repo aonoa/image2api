@@ -15,8 +15,8 @@ import (
 const (
 	baseURL                  = "https://chatgpt.com"
 	defaultUserAgent         = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
-	defaultClientVersion     = "prod-ab8a6348980a3e1d771c463b9f4f3e4e584f2769"
-	defaultClientBuildNumber = "7624276"
+	defaultClientVersion     = "prod-db390ebea64862bf1899c420a4c736e0cf639747"
+	defaultClientBuildNumber = "7904904"
 	defaultPOWScript         = "https://chatgpt.com/backend-api/sentinel/sdk.js"
 )
 
@@ -28,7 +28,90 @@ var (
 	scriptSrcRE          = regexp.MustCompile(`<script[^>]+src="([^"]+)"`)
 	dataBuildPathRE      = regexp.MustCompile(`c/[^/]*/_`)
 	htmlDataBuildRE      = regexp.MustCompile(`<html[^>]*data-build="([^"]*)"`)
+
+	// asyncMarkers signal that ChatGPT accepted the prompt and switched to the
+	// async image pipeline (image is delivered later via conversation polling
+	// rather than inline in the SSE stream). Their presence means "generating —
+	// keep polling", NOT failure.
+	asyncMarkers = []string{"image_gen_async", "image_gen_task_id", "trigger_async_ux"}
+
+	// contentPolicyMarkers are stable substrings of ChatGPT's content-audit
+	// refusal message. When one appears in an assistant turn the prompt was
+	// rejected upstream — no image will ever arrive, so we must fail fast
+	// instead of polling until timeout.
+	contentPolicyMarkers = []string{
+		"this request may violate our content polic",
+		"this prompt may violate our content polic",
+		"may violate our content policies",
+	}
 )
+
+// containsAsyncMarker reports whether the SSE payload indicates the async image
+// pipeline was engaged.
+func containsAsyncMarker(text string) bool {
+	for _, m := range asyncMarkers {
+		if strings.Contains(text, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// detectContentPolicyRejection reports whether text contains a ChatGPT content
+// audit refusal. Matching is case-insensitive for the English variants.
+func detectContentPolicyRejection(text string) bool {
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+	for _, m := range contentPolicyMarkers {
+		if strings.Contains(text, m) || strings.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// collectText concatenates every string found under value (recursively) into sb.
+func collectText(value any, sb *strings.Builder) {
+	switch x := value.(type) {
+	case string:
+		sb.WriteString(x)
+		sb.WriteByte('\n')
+	case map[string]any:
+		for _, item := range x {
+			collectText(item, sb)
+		}
+	case []any:
+		for _, item := range x {
+			collectText(item, sb)
+		}
+	}
+}
+
+// conversationRejected scans assistant turns of a fetched conversation for a
+// content-policy refusal.
+func conversationRejected(conversation map[string]any) bool {
+	mapping, _ := conversation["mapping"].(map[string]any)
+	for _, rawNode := range mapping {
+		node, _ := rawNode.(map[string]any)
+		message, _ := node["message"].(map[string]any)
+		if message == nil {
+			continue
+		}
+		author, _ := message["author"].(map[string]any)
+		role := strings.ToLower(strings.TrimSpace(stringValue(author["role"])))
+		if role != "assistant" {
+			continue
+		}
+		var sb strings.Builder
+		collectText(message["content"], &sb)
+		if detectContentPolicyRejection(sb.String()) {
+			return true
+		}
+	}
+	return false
+}
 
 func stringValue(v any) string {
 	switch x := v.(type) {

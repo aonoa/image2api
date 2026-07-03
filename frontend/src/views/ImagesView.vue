@@ -1,6 +1,6 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { api, generatedUrl } from '../api'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { api, generatedUrl, thumbUrl } from '../api'
 import { fmtTs, fmtSize } from '../utils/format'
 import { copyText } from '../utils/clipboard'
 import Icon from '../components/Icon.vue'
@@ -12,6 +12,9 @@ const stats = ref({ total: 0, image: 0, video: 0, size_bytes: 0 })
 const loading = ref(false)
 const kind = ref('')          // '' | 'image' | 'video'
 const selected = ref(null)
+// Videos whose first-frame thumbnail is missing (old videos) — fall back to
+// the muted <video> preview for those cards.
+const thumbFail = reactive({})
 const toast = ref('')
 
 const page = ref(1)
@@ -139,13 +142,19 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
            @click="selected = f">
         <!-- media -->
         <template v-if="f.kind === 'video'">
-          <video :src="generatedUrl(f.name)" muted loop preload="metadata"
+          <!-- first-frame still as background-image (same as image cards); the
+               hidden probe img flips to the <video> fallback for old videos. -->
+          <div v-if="!thumbFail[f.name]" :style="{ backgroundImage: `url(${thumbUrl(f.name)})` }"
+               class="absolute inset-0 w-full h-full bg-cover bg-center transition-transform duration-300 group-hover:scale-105">
+            <img :src="thumbUrl(f.name)" class="hidden" @error="thumbFail[f.name] = true" />
+          </div>
+          <video v-else :src="generatedUrl(f.name)" muted loop preload="metadata"
                  class="absolute inset-0 w-full h-full object-cover"
                  @mouseenter="$event.target.play && $event.target.play()"
                  @mouseleave="$event.target.pause && $event.target.pause()" />
         </template>
         <!-- background-image (not <img>) so Edge shows no 视觉搜索 overlay icon. -->
-        <div v-else :style="{ backgroundImage: `url(${generatedUrl(f.name)})` }"
+        <div v-else :style="{ backgroundImage: `url(${thumbUrl(f.name)})` }"
              class="absolute inset-0 w-full h-full bg-cover bg-center transition-transform duration-300 group-hover:scale-105"></div>
 
         <!-- gradient veil (always visible so the prompt overlay reads) -->

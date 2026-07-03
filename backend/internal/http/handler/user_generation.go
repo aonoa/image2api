@@ -70,7 +70,7 @@ func (h *UserGenerationHandler) Generate(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrUnknownModel):
 			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error()})
-		case errors.Is(err, service.ErrUnsupportedParams), errors.Is(err, service.ErrPromptTooLong):
+		case errors.Is(err, service.ErrUnsupportedParams):
 			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		case errors.Is(err, service.ErrInsufficientFunds):
 			c.JSON(http.StatusPaymentRequired, gin.H{"detail": "积分不足"})
@@ -132,7 +132,7 @@ func (h *UserGenerationHandler) Test(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrUnknownModel):
 			c.JSON(http.StatusNotFound, gin.H{"detail": err.Error()})
-		case errors.Is(err, service.ErrUnsupportedParams), errors.Is(err, service.ErrPromptTooLong):
+		case errors.Is(err, service.ErrUnsupportedParams):
 			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		case errors.Is(err, service.ErrProviderQuota):
 			c.JSON(http.StatusTooManyRequests, gin.H{"detail": err.Error()})
@@ -218,6 +218,13 @@ func (h *UserGenerationHandler) Logs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to load logs"})
 		return
 	}
+	// Resolve account_id -> account label so the log table can show which
+	// provider account fulfilled each generation under the user.
+	accountByID, err := h.admin.AccountNameMap(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "failed to load logs"})
+		return
+	}
 
 	out := make([]gin.H, 0, len(items))
 	for _, item := range items {
@@ -228,6 +235,14 @@ func (h *UserGenerationHandler) Logs(c *gin.Context) {
 			userName = name
 		} else {
 			userName = item.UserID
+		}
+		var accountName any
+		if item.AccountID != "" {
+			if label, ok := accountByID[item.AccountID]; ok {
+				accountName = label
+			} else {
+				accountName = item.AccountID
+			}
 		}
 		out = append(out, gin.H{
 			"id":         item.ID,
@@ -244,6 +259,8 @@ func (h *UserGenerationHandler) Logs(c *gin.Context) {
 			"source":     emptyStringNil(item.Source),
 			"user_id":    emptyStringNil(item.UserID),
 			"user_name":  userName,
+			"account_id": emptyStringNil(item.AccountID),
+			"account":    accountName,
 			"cost":       item.Cost,
 			"elapsed_ms": item.ElapsedMS,
 			"file":       emptyStringNil(item.File),
@@ -348,7 +365,7 @@ func (h *UserGenerationHandler) catalogEntries(c *gin.Context) ([]gin.H, error) 
 			"ratios":               []string{"1:1", "16:9", "9:16", "4:3", "3:4"},
 			"resolutions":          []string{"1K"},
 			"image_to_image":       true,
-			"max_reference_images": 3,
+			"max_reference_images": 6,
 			"description":          "ChatGPT image generation",
 		},
 		{
@@ -384,7 +401,7 @@ func (h *UserGenerationHandler) catalogEntries(c *gin.Context) ([]gin.H, error) 
 			"id":                   "nano-banana-2",
 			"provider":             "runway",
 			"type":                 "image",
-			"ratios":               []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "3:2", "5:4", "4:5", "2:3"},
+			"ratios":               []string{"1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"},
 			"resolutions":          []string{"1K", "2K", "4K"},
 			"image_to_image":       true,
 			"max_reference_images": 6,
@@ -545,7 +562,7 @@ func (h *UserGenerationHandler) publicModels() ([]gin.H, error) {
 			"id":          "nano-banana-2",
 			"provider":    "runway",
 			"kind":        "image",
-			"ratios":      []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "3:2", "5:4", "4:5", "2:3"},
+			"ratios":      []string{"1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"},
 			"resolutions": []string{"1K", "2K", "4K"},
 			"description": "Runway Nano Banana 2",
 			"stub":        false,

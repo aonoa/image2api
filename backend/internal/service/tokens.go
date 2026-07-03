@@ -862,23 +862,12 @@ func (s *TokenService) ImportGrokToken(ctx context.Context, ssoToken, tokenID st
 		return nil, errors.New("not a grok sso token")
 	}
 	sid := grok.SessionIDFromToken(ssoToken)
-	// Resolve the real account email up front (GET /api/auth/session) for dedup +
-	// display — the sso session_id rotates per login, so email is the stable id.
-	email := ""
-	if s.grok != nil {
-		s.applyProxy(ctx)
-		if e, _, ferr := s.grok.FetchSession(ctx, ssoToken); ferr == nil {
-			email = e
-		}
-	}
-	idKey := email
-	if idKey == "" {
-		idKey = sid
-	}
-	// Identity is (pool, email): reuse the row for this account, else mint.
-	if existing, _ := s.tokens.GetByPoolEmail(ctx, "grok", idKey); existing != nil {
-		tokenID = existing.ID
-	} else if idKey != "" || tokenID == "" {
+	// Fully async, no dedup: every import mints a fresh row (a passed-in tokenID is
+	// an explicit edit → update). We do NOT look up an existing account by
+	// email/session_id, and we leave account_email empty — email, quota and
+	// recovery time are all filled off-thread by checkPendingGrok, which also
+	// disables the account if the sso session is dead.
+	if strings.TrimSpace(tokenID) == "" {
 		tokenID = newTokenID("grok")
 	}
 	meta := datatypes.JSONMap{"pending_check": true}
@@ -895,11 +884,6 @@ func (s *TokenService) ImportGrokToken(ctx context.Context, ssoToken, tokenID st
 			}
 		} else {
 			return nil, err
-		}
-	}
-	if idKey != "" {
-		if updated, uerr := s.tokens.Update(ctx, "grok", tokenID, map[string]any{"account_email": idKey}); uerr == nil {
-			item = updated
 		}
 	}
 	go s.checkPendingGrok(tokenID, ssoToken)
@@ -922,6 +906,17 @@ func (s *TokenService) checkPendingGrok(tokenID, ssoToken string) {
 		return
 	}
 	s.applyProxy(ctx)
+	// Validate the session first: a dead sso answers 200 {"status":"unauthenticated"},
+	// which FetchSession now maps to ErrAuth → disable. Also backfill the email if
+	// import couldn't resolve it (empty account_email currently shows the session id).
+	if email, _, serr := s.grok.FetchSession(ctx, ssoToken); serr != nil {
+		if errors.Is(serr, grok.ErrAuth) {
+			s.finishPending(ctx, "grok", tokenID, "disabled", true, nil)
+			return
+		}
+	} else if strings.TrimSpace(email) != "" {
+		_, _ = s.tokens.Update(ctx, "grok", tokenID, map[string]any{"account_email": strings.TrimSpace(email)})
+	}
 	data, err := s.grok.FetchCreditsBalance(ctx, ssoToken)
 	if err != nil {
 		if errors.Is(err, grok.ErrAuth) {

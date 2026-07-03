@@ -66,10 +66,48 @@ func (c *Client) ExchangeCookie(ctx context.Context, cookie string) (*CookieExch
 	return exchangeCookieWithTLSClient(ctx, client, cookie)
 }
 
+// uploadMaxRetries is how many extra in-place attempts a transient upload
+// failure (transport error / timeout, 429/451/5xx) gets on a fresh connection
+// before the error is surfaced.
+const uploadMaxRetries = 5
+
+// UploadImage stores a reference image and returns its blob id. Transient
+// failures are retried in place (uploadMaxRetries times); the final error keeps
+// its original (non-temporary) classification so the account is not penalized
+// for a network blip.
 func (c *Client) UploadImage(ctx context.Context, token string, content []byte, contentType, engine string) (string, error) {
-	client, err := c.newTLSClient()
+	body, err, retryable := c.uploadImageOnce(ctx, token, content, contentType, engine)
+	for attempt := 0; err != nil && retryable && attempt < uploadMaxRetries && ctx.Err() == nil; attempt++ {
+		body, err, retryable = c.uploadImageOnce(ctx, token, content, contentType, engine)
+	}
 	if err != nil {
 		return "", err
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", err
+	}
+	if images, ok := payload["images"].([]any); ok && len(images) > 0 {
+		if first, ok := images[0].(map[string]any); ok {
+			if id := strings.TrimSpace(stringValue(first["id"])); id != "" {
+				return id, nil
+			}
+		}
+	}
+	if id := strings.TrimSpace(stringValue(payload["id"])); id != "" {
+		return id, nil
+	}
+	return "", errors.New("adobe upload missing blob id")
+}
+
+// uploadImageOnce performs a single upload attempt and returns the raw response
+// body plus whether a failure is retryable (transport error / 429/451/5xx).
+// Auth failures (401/403) and other non-200s are not retryable.
+func (c *Client) uploadImageOnce(ctx context.Context, token string, content []byte, contentType, engine string) ([]byte, error, bool) {
+	client, err := c.newTLSClient()
+	if err != nil {
+		return nil, err, false
 	}
 
 	endpoint := uploadURL
@@ -78,7 +116,7 @@ func (c *Client) UploadImage(ctx context.Context, token string, content []byte, 
 	}
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(content))
 	if err != nil {
-		return "", err
+		return nil, err, false
 	}
 	req = req.WithContext(ctx)
 	req.Header = http.Header{
@@ -98,36 +136,26 @@ func (c *Client) UploadImage(ctx context.Context, token string, content []byte, 
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("adobe upload request: %w", err)
+		// Transport error (incl. Client.Timeout on the storage endpoint) — a
+		// network blip, retryable on a fresh connection.
+		return nil, fmt.Errorf("adobe upload request: %w", err), true
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return nil, err, true
 	}
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		return "", fmt.Errorf("%w (upload %d %s: %s)", ErrAuth, resp.StatusCode, resp.Header.Get("x-access-error"), clip(body, 300))
+		return nil, fmt.Errorf("%w (upload %d %s: %s)", ErrAuth, resp.StatusCode, resp.Header.Get("x-access-error"), clip(body, 300)), false
+	}
+	if resp.StatusCode == 429 || resp.StatusCode == 451 || resp.StatusCode >= 500 {
+		return nil, fmt.Errorf("adobe upload failed: %d %s", resp.StatusCode, clip(body, 300)), true
 	}
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("adobe upload failed: %d %s", resp.StatusCode, clip(body, 300))
+		return nil, fmt.Errorf("adobe upload failed: %d %s", resp.StatusCode, clip(body, 300)), false
 	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", err
-	}
-	if images, ok := payload["images"].([]any); ok && len(images) > 0 {
-		if first, ok := images[0].(map[string]any); ok {
-			if id := strings.TrimSpace(stringValue(first["id"])); id != "" {
-				return id, nil
-			}
-		}
-	}
-	if id := strings.TrimSpace(stringValue(payload["id"])); id != "" {
-		return id, nil
-	}
-	return "", errors.New("adobe upload missing blob id")
+	return body, nil, true
 }
 
 func (c *Client) GenerateImage(ctx context.Context, token, modelID, prompt, aspectRatio, resolution string, blobIDs []string) ([]byte, map[string]any, error) {
@@ -608,7 +636,7 @@ func (c *Client) submitVideo(ctx context.Context, client tlsclient.HttpClient, t
 		return respBody, "", ErrTemporaryUpstream
 	}
 	// "system under load" / timeout_error = adobe overload — treat as a temporary
-	// error so the tempAsDead policy retires the account (same as the image path).
+	// error so the tempFailover policy moves to the next account (same as the image path).
 	if b := string(respBody); strings.Contains(b, "system under load") || strings.Contains(b, "timeout_error") {
 		return respBody, "", ErrTemporaryUpstream
 	}

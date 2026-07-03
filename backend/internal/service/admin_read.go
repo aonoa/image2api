@@ -62,25 +62,25 @@ func (s *AdminReadService) ModelsView(ctx context.Context) ([]map[string]any, er
 	out := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		out = append(out, map[string]any{
-			"id":                   item.ID,
-			"type":                 item.Type,
-			"name":                 item.Name,
-			"provider":             item.Provider,
-			"enabled":              item.Enabled,
-			"ratios":               repo.JSONStrings(item.Ratios),
-			"prices":               map[string]any(item.Prices),
-			"resolutions":          repo.JSONStrings(item.Resolutions),
-			"image_to_image":       item.ImageToImage,
-			"duration_prices":      map[string]any(item.DurationPrices),
+			"id":                    item.ID,
+			"type":                  item.Type,
+			"name":                  item.Name,
+			"provider":              item.Provider,
+			"enabled":               item.Enabled,
+			"ratios":                repo.JSONStrings(item.Ratios),
+			"prices":                map[string]any(item.Prices),
+			"resolutions":           repo.JSONStrings(item.Resolutions),
+			"image_to_image":        item.ImageToImage,
+			"duration_prices":       map[string]any(item.DurationPrices),
 			"prices_agent":          map[string]any(item.PricesAgent),
 			"duration_prices_agent": map[string]any(item.DurationPricesAgent),
-			"durations":            repo.JSONStrings(item.Durations),
-			"max_reference_images": item.MaxReferenceImages,
-			"reference_mode":       item.ReferenceMode,
-			"weight":               item.Weight,
-			"generation_count":     item.GenerationCount,
-			"created_at":           item.CreatedAt,
-			"updated_at":           item.UpdatedAt,
+			"durations":             repo.JSONStrings(item.Durations),
+			"max_reference_images":  item.MaxReferenceImages,
+			"reference_mode":        item.ReferenceMode,
+			"weight":                item.Weight,
+			"generation_count":      item.GenerationCount,
+			"created_at":            item.CreatedAt,
+			"updated_at":            item.UpdatedAt,
 		})
 	}
 	return out, nil
@@ -132,6 +132,28 @@ func (s *AdminReadService) UserNameMap(ctx context.Context) (map[string]string, 
 			name = u.ID
 		}
 		out[u.ID] = name
+	}
+	return out, nil
+}
+
+// AccountNameMap builds a token-account id -> display label lookup (account
+// email, else display name, else id) used to annotate log rows with which
+// provider account fulfilled each generation (event_logs.account_id).
+func (s *AdminReadService) AccountNameMap(ctx context.Context) (map[string]string, error) {
+	accounts, err := s.tokens.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(accounts))
+	for _, a := range accounts {
+		label := strings.TrimSpace(a.AccountEmail)
+		if label == "" {
+			label = strings.TrimSpace(a.AccountDisplayName)
+		}
+		if label == "" {
+			label = a.ID
+		}
+		out[a.ID] = label
 	}
 	return out, nil
 }
@@ -551,6 +573,9 @@ func (s *AdminReadService) scanGeneratedFiles(ctx context.Context) ([]generatedF
 	for _, o := range objs {
 		if isReferenceFile(o.Key) {
 			continue // reference uploads are not generated outputs — hide from gallery
+		}
+		if IsThumbKey(o.Key) || IsLastFrameKey(o.Key) {
+			continue // thumbnails / last-frame stills are derived — only originals are listed
 		}
 		kind := mediaKind(o.Key)
 		if kind == "" {
