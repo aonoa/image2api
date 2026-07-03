@@ -45,7 +45,6 @@ async function doSmartImport() {
   const errs = []
   for (let i = 0; i < items.length; i++) {
     const it = items[i]
-    setStatus(`正在导入 ${i + 1}/${items.length} (${it.type})…`)
     try {
       const r = it.type === 'openai'
         ? await api('/tokens/import-chatgpt-token', jsonBody('POST', { access_token: it.value }))
@@ -77,9 +76,10 @@ async function doSmartImport() {
   // Quota isn't checked here — the server probes each token off-thread and the
   // account list flips pending → active/dead on its own.
   if (fail === 0) {
-    setStatus(`✓ 导入 ${ok} 项 · 正在后台检测额度…`)
+    // Close immediately on success — the account lands in the table right away
+    // and the server backfills quota/email off-thread (pending → active/dead).
     emit('imported')
-    setTimeout(() => emit('close'), 1000)
+    emit('close')
   } else {
     setStatus(`成功 ${ok} · 失败 ${fail} · ${errs.slice(0, 3).join(' | ')}`, true)
     emit('imported')

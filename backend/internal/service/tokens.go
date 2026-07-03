@@ -862,26 +862,12 @@ func (s *TokenService) ImportGrokToken(ctx context.Context, ssoToken, tokenID st
 		return nil, errors.New("not a grok sso token")
 	}
 	sid := grok.SessionIDFromToken(ssoToken)
-	// Resolve the real account email up front (GET /api/auth/session) for dedup +
-	// display — the sso session_id rotates per login, so email is the stable id.
-	email := ""
-	if s.grok != nil {
-		s.applyProxy(ctx)
-		// Best-effort email resolution. A dead/blocked probe must NOT block import:
-		// land the account and let the async checkPendingGrok disable it if the
-		// session is truly dead. Empty email just falls back to the session id.
-		if e, _, ferr := s.grok.FetchSession(ctx, ssoToken); ferr == nil {
-			email = e
-		}
-	}
-	idKey := email
-	if idKey == "" {
-		idKey = sid
-	}
-	// Identity is (pool, email): reuse the row for this account, else mint.
-	if existing, _ := s.tokens.GetByPoolEmail(ctx, "grok", idKey); existing != nil {
-		tokenID = existing.ID
-	} else if idKey != "" || tokenID == "" {
+	// Fully async, no dedup: every import mints a fresh row (a passed-in tokenID is
+	// an explicit edit → update). We do NOT look up an existing account by
+	// email/session_id, and we leave account_email empty — email, quota and
+	// recovery time are all filled off-thread by checkPendingGrok, which also
+	// disables the account if the sso session is dead.
+	if strings.TrimSpace(tokenID) == "" {
 		tokenID = newTokenID("grok")
 	}
 	meta := datatypes.JSONMap{"pending_check": true}
@@ -898,11 +884,6 @@ func (s *TokenService) ImportGrokToken(ctx context.Context, ssoToken, tokenID st
 			}
 		} else {
 			return nil, err
-		}
-	}
-	if idKey != "" {
-		if updated, uerr := s.tokens.Update(ctx, "grok", tokenID, map[string]any{"account_email": idKey}); uerr == nil {
-			item = updated
 		}
 	}
 	go s.checkPendingGrok(tokenID, ssoToken)
