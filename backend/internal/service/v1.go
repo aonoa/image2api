@@ -995,6 +995,10 @@ func (s *V1Service) prepareImage(ctx context.Context, principal *APIPrincipal, i
 	// an explicit resolution; the OpenAI /v1 path derives it from size. There is no
 	// `quality` param — size is the single source of truth for resolution.
 	aspectRatio, resolution := parseImageSize(in.Size, in.AspectRatio, in.Resolution)
+	// Snap to the nearest ratio the model actually supports — a `size`-derived
+	// ratio (e.g. 1:3) must never be passed through to an upstream that rejects
+	// it (Runway 400s on ratios outside its list).
+	aspectRatio = snapRatio(aspectRatio, repo.JSONStrings(modelItem.Ratios))
 	// parseImageSize defaults a blank resolution to "2K" (OpenAI-size parity).
 	// For a model that doesn't price that tier — e.g. gpt-image-2 is 1K-only —
 	// fall back to its first supported tier so a missing/stale resolution from
@@ -2639,19 +2643,54 @@ func parseImageSize(size, aspectRatio, resolution string) (string, string) {
 	return ar, rs
 }
 
+// snapRatio returns the entry in supported closest in value to ar ("W:H").
+// ar is returned as-is when it's already supported, unparsable, or the model
+// has no ratio list.
+func snapRatio(ar string, supported []string) string {
+	parse := func(s string) (float64, bool) {
+		var w, h int
+		if _, err := fmt.Sscanf(strings.TrimSpace(s), "%d:%d", &w, &h); err != nil || w <= 0 || h <= 0 {
+			return 0, false
+		}
+		return float64(w) / float64(h), true
+	}
+	v, ok := parse(ar)
+	if !ok || len(supported) == 0 {
+		return ar
+	}
+	best, bestDelta := "", 0.0
+	for _, s := range supported {
+		if strings.TrimSpace(strings.ReplaceAll(s, "x", ":")) == ar {
+			return ar
+		}
+		sv, sok := parse(strings.ReplaceAll(s, "x", ":"))
+		if !sok {
+			continue
+		}
+		if d := absFloat(v - sv); best == "" || d < bestDelta {
+			best, bestDelta = strings.TrimSpace(strings.ReplaceAll(s, "x", ":")), d
+		}
+	}
+	if best == "" {
+		return ar
+	}
+	return best
+}
+
 func guessRatio(w, h int) string {
 	type candidate struct {
 		W int
 		H int
 	}
-	// The 13 ratios actually used across our models. Must stay in sync with the
+	// The 17 ratios actually used across our models. Must stay in sync with the
 	// custom-model picker (CustomModelModal RATIO_OPTS) and the docs 对照表, so a
 	// /v1 `size` maps to exactly one of them. 9:21 is intentionally absent —
-	// no image provider accepts it (Runway 400s on it).
+	// no image provider accepts it (Runway 400s on it). snapRatio then clamps
+	// the guess to the target model's own supported list.
 	candidates := []candidate{
 		{1, 1},
-		{5, 4}, {4, 3}, {3, 2}, {16, 9}, {2, 1}, {21, 9}, {3, 1}, // 横
-		{4, 5}, {3, 4}, {2, 3}, {9, 16}, {1, 3}, // 竖
+		{5, 4}, {4, 3}, {3, 2}, {16, 9}, {2, 1}, {21, 9}, {3, 1}, {4, 1}, {8, 1}, // 横
+		{4, 5}, {3, 4}, {2, 3}, {9, 16}, {1, 3}, {1, 4}, {1, 8}, // 竖
 	}
 	best := candidates[0]
 	bestDelta := absFloat(float64(w)/float64(h) - float64(best.W)/float64(best.H))

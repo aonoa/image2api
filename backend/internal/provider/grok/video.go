@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	http "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
@@ -166,12 +168,31 @@ func (c *Client) GenerateVideo(ctx context.Context, token, prompt, aspectRatio, 
 
 // uploadImage uploads one reference frame via /rest/app-chat/upload-file (JSON
 // with base64 content) and returns its asset content URL for imageReferences.
+// Cloudflare's bot score is per-request, so a big base64 upload can hit a
+// "Just a moment…" 403 intermittently while identical requests pass — retry
+// transient failures with backoff instead of failing the whole task.
 func (c *Client) uploadImage(ctx context.Context, client tlsclient.HttpClient, token string, img []byte) (string, error) {
-	res, err := c.postJSON(ctx, client, token, "/rest/app-chat/upload-file", map[string]any{
+	body := map[string]any{
 		"fileName":     "ref.png",
 		"fileMimeType": "image/png",
 		"content":      base64.StdEncoding.EncodeToString(img),
-	})
+	}
+	var res map[string]any
+	var err error
+	backoffs := []time.Duration{0, 2 * time.Second, 5 * time.Second, 10 * time.Second}
+	for _, wait := range backoffs {
+		if wait > 0 {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+		res, err = c.postJSON(ctx, client, token, "/rest/app-chat/upload-file", body)
+		if err == nil || !errors.Is(err, ErrTemporaryUpstream) {
+			break
+		}
+	}
 	if err != nil {
 		return "", err
 	}
@@ -252,7 +273,9 @@ func (c *Client) doPost(ctx context.Context, client tlsclient.HttpClient, token,
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, resp.StatusCode, err
+		// Mid-body HTTP/2 stream resets ("stream error: ... INTERNAL_ERROR") are
+		// transient — surface them as retryable.
+		return nil, resp.StatusCode, fmt.Errorf("%w: %v", ErrTemporaryUpstream, err)
 	}
 	return raw, resp.StatusCode, nil
 }
@@ -297,7 +320,29 @@ func (c *Client) OpenAsset(ctx context.Context, token, url string) (io.ReadClose
 	return resp.Body, ct, nil
 }
 
+// download fetches the rendered artifact. The clip is already generated at this
+// point, so a transient failure here (HTTP/2 stream reset, CF hiccup) must not
+// fail the whole task — retry with backoff.
 func (c *Client) download(ctx context.Context, client tlsclient.HttpClient, token, url string) ([]byte, error) {
+	var data []byte
+	var err error
+	for _, wait := range []time.Duration{0, 2 * time.Second, 5 * time.Second, 10 * time.Second} {
+		if wait > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+		data, err = c.downloadOnce(ctx, client, token, url)
+		if err == nil || !errors.Is(err, ErrTemporaryUpstream) {
+			break
+		}
+	}
+	return data, err
+}
+
+func (c *Client) downloadOnce(ctx context.Context, client tlsclient.HttpClient, token, url string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -318,7 +363,7 @@ func (c *Client) download(ctx context.Context, client tlsclient.HttpClient, toke
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrTemporaryUpstream, err)
 	}
 	if len(data) == 0 {
 		return nil, fmt.Errorf("%w: empty video download", ErrTemporaryUpstream)
