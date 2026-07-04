@@ -137,7 +137,7 @@ onMounted(load)
         </tbody>
       </table>
       <div v-if="totalPages > 1" class="flex items-center justify-between px-5 py-3 border-t border-white/[0.06] text-xs text-white/45">
-        <div><span class="tabular-nums text-white/75">{{ items.length }}</span><span class="ml-1">个违禁词</span></div>
+        <div><span class="tabular-nums text-white/75">{{ items.length ? (Math.min(page, totalPages) - 1) * pageSize + 1 : 0 }}–{{ Math.min(items.length, Math.min(page, totalPages) * pageSize) }}</span><span class="ml-1">/ {{ items.length }} 条</span></div>
         <div class="flex items-center gap-1">
           <template v-for="(n, i) in pageNumbers" :key="i">
             <span v-if="n === null" class="px-1 text-white/30">…</span>
