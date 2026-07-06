@@ -73,6 +73,15 @@ func (c *Client) GenerateImage(ctx context.Context, accessToken, prompt, model, 
 		return nil, nil, err
 	}
 
+	// Fail over immediately when the account's image_gen allowance is spent:
+	// submitting anyway just burns the whole poll budget and surfaces as
+	// "image poll timeout". Unknown quota (init failed) proceeds as before.
+	if quota, qErr := c.fetchImageQuota(ctx, session, accessToken); qErr == nil && quota["unknown"] == false {
+		if remaining, ok := quota["remaining"].(int); ok && remaining <= 0 {
+			return nil, nil, fmt.Errorf("%w: image_gen remaining 0 (resets %s)", ErrQuotaExhausted, stringValue(quota["reset_after"]))
+		}
+	}
+
 	scriptSources, dataBuild, err := c.bootstrap(ctx, session)
 	if err != nil {
 		return nil, nil, err
@@ -142,6 +151,10 @@ func (c *Client) FetchImageQuota(ctx context.Context, accessToken string) (map[s
 	if err != nil {
 		return nil, err
 	}
+	return c.fetchImageQuota(ctx, session, accessToken)
+}
+
+func (c *Client) fetchImageQuota(ctx context.Context, session tlsclient.HttpClient, accessToken string) (map[string]any, error) {
 	path := "/backend-api/conversation/init"
 	body, _ := json.Marshal(map[string]any{
 		"gizmo_id":                nil,
@@ -949,12 +962,27 @@ func (c *Client) pollForImage(ctx context.Context, session tlsclient.HttpClient,
 }
 
 func (c *Client) getFileDownloadURL(ctx context.Context, session tlsclient.HttpClient, accessToken, conversationID, fileID string, inline bool) (string, error) {
-	// Python parity (_get_file_download_url): GET /backend-api/files/{id}/download
-	// with NO query params. The old /files/download/{id}?conversation_id&inline
-	// form returned an inline stream URL that 403s with "File stream access denied".
-	_ = conversationID
-	_ = inline
-	path := "/backend-api/files/" + fileID + "/download"
+	// Current web client form: GET /backend-api/files/download/{id}
+	// ?conversation_id=...&inline=false → {"status":"success","download_url":...}.
+	// Falls back to the legacy /files/{id}/download form if the new one fails.
+	paths := []string{
+		"/backend-api/files/download/" + fileID + "?conversation_id=" + conversationID + "&inline=" + strconv.FormatBool(inline),
+		"/backend-api/files/" + fileID + "/download",
+	}
+	var lastErr error
+	for _, path := range paths {
+		rawURL, err := c.fetchDownloadURL(ctx, session, accessToken, path)
+		if err == nil && rawURL != "" {
+			return rawURL, nil
+		}
+		if err != nil {
+			lastErr = err
+		}
+	}
+	return "", lastErr
+}
+
+func (c *Client) fetchDownloadURL(ctx context.Context, session tlsclient.HttpClient, accessToken, path string) (string, error) {
 	req, err := http.NewRequest(http.MethodGet, baseURL+path, nil)
 	if err != nil {
 		return "", err

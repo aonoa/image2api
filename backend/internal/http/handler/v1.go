@@ -223,7 +223,7 @@ func readMultipartImages(c *gin.Context, keys ...string) []string {
 			if e != nil {
 				continue
 			}
-			b, _ := io.ReadAll(io.LimitReader(f, 8<<20+1))
+			b, _ := io.ReadAll(io.LimitReader(f, 20<<20+1))
 			f.Close()
 			if len(b) > 0 {
 				out = append(out, base64.StdEncoding.EncodeToString(b))

@@ -43,6 +43,22 @@ var (
 		"this request may violate our content polic",
 		"this prompt may violate our content polic",
 		"may violate our content policies",
+		"i can't help with",
+		"i can\u2019t help with",
+		"i cannot help with",
+		"i can't assist with",
+		"i can\u2019t assist with",
+		"i cannot assist with",
+		"i'm unable to help with",
+		"i\u2019m unable to help with",
+		"can't create images",
+		"can\u2019t create images",
+		"cannot create images",
+		"can't generate images",
+		"can\u2019t generate images",
+		"cannot generate images",
+		"unable to create images",
+		"unable to generate images",
 	}
 )
 

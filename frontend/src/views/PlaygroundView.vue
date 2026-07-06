@@ -181,16 +181,18 @@ function setMode(m) {
 }
 
 function openPicker() { fileInput.value && fileInput.value.click() }
-// Backend rejects reference images over 8MB (maxReferenceImageBytes). Enforce it
+// Backend rejects reference images over 20MB (maxReferenceImageBytes). Enforce it
 // here at pick time so an oversized image fails fast with a clear message instead
 // of charging + failing upstream after the upload.
-const MAX_REF_BYTES = 8 * 1024 * 1024
+const MAX_REF_BYTES = 20 * 1024 * 1024
 function onFiles(ev) {
   addFiles(Array.from(ev.target.files || []))
   if (ev.target) ev.target.value = ''
 }
 // Shared by the file picker AND drag-and-drop. Filters to images, honors the
-// per-model max + 8MB cap, reads each to a data URL.
+// per-model max + 20MB cap. The preview renders the picked file directly via an
+// object URL (browser scales it down, no base64 copy in the DOM); the ORIGINAL
+// file is kept untouched and is what gets uploaded at submit time.
 function addFiles(files) {
   files = files.filter((f) => f && f.type && f.type.startsWith('image/'))
   const room = Math.max(0, maxRefs.value - refImages.value.length)
@@ -199,13 +201,11 @@ function addFiles(files) {
   for (const f of files) {
     if (added >= room) break
     if (f.size > MAX_REF_BYTES) { tooBig.push(f.name); continue }
-    const reader = new FileReader()
-    reader.onload = () => refImages.value.push({ name: f.name, dataUrl: reader.result })
-    reader.readAsDataURL(f)
+    refImages.value.push({ name: f.name, file: f, thumb: URL.createObjectURL(f) })
     added++
   }
   error.value = tooBig.length
-    ? `图片超过 8MB 已跳过：${tooBig.join('、')}（请压缩后再传）`
+    ? `图片超过 20MB 已跳过：${tooBig.join('、')}（请压缩后再传）`
     : ''
 }
 // Drag-and-drop onto the reference area.
@@ -225,7 +225,10 @@ function onDragLeave(ev) {
   if (ev.currentTarget.contains(ev.relatedTarget)) return
   dragOver.value = false
 }
-function removeRef(i) { refImages.value.splice(i, 1) }
+function removeRef(i) {
+  const [gone] = refImages.value.splice(i, 1)
+  if (gone?.thumb?.startsWith('blob:')) URL.revokeObjectURL(gone.thumb)
+}
 
 // Re-hydrate reference thumbnails from server URLs (after a reload). Fetches
 // each /images URL (same-origin, cookie-authed) and converts to a data URL so
@@ -240,10 +243,20 @@ function restoreRefs(urls) {
   refImages.value = urls.map((u) => ({ name: 'ref', url: u }))
 }
 
-// refToBase64 yields the raw base64 the backend expects, from either a freshly
-// uploaded ref (dataUrl) or a restored one (url → fetch). Returns '' on failure.
+// refToBase64 yields the raw base64 the backend expects, from a freshly picked
+// ref (file — the untouched original), a data-URL ref (pasted/frame captures)
+// or a restored one (url → fetch). Returns '' on failure.
 async function refToBase64(r) {
   try {
+    if (r.file) {
+      const dataUrl = await new Promise((res, rej) => {
+        const fr = new FileReader()
+        fr.onload = () => res(fr.result)
+        fr.onerror = rej
+        fr.readAsDataURL(r.file)
+      })
+      return dataUrl.replace(/^data:[^,]*,/, '')
+    }
     if (r.dataUrl) return r.dataUrl.replace(/^data:[^,]*,/, '')
     if (r.url) {
       const blob = await (await fetch(r.url)).blob()
@@ -650,7 +663,7 @@ onUnmounted(() => {
         <label class="block text-xs font-medium text-slate-500 mb-1.5">
           参考图
           <span class="text-slate-400 font-normal">
-            (最多 {{ maxRefs }} 张{{ refMode === 'frame' && mode === 'video' ? (maxRefs >= 2 ? ' · 首帧/末帧' : ' · 首帧') : '' }} · 单张 ≤8MB)
+            (最多 {{ maxRefs }} 张{{ refMode === 'frame' && mode === 'video' ? (maxRefs >= 2 ? ' · 首帧/末帧' : ' · 首帧') : '' }} · 单张 ≤20MB)
           </span>
           <span v-if="refsRequired" class="text-rose-500">*</span>
         </label>
@@ -659,7 +672,7 @@ onUnmounted(() => {
              @drop="onDrop" @dragover="onDragOver" @dragleave="onDragLeave">
           <div v-for="(img, i) in refImages" :key="i"
                class="relative w-20 h-20 rounded-lg overflow-hidden border border-slate-200 bg-slate-50 transition-all">
-            <img :src="img.dataUrl || img.url" class="w-full h-full object-cover" />
+            <img :src="img.thumb || img.dataUrl || img.url" class="w-full h-full object-cover" />
             <button type="button" @click="removeRef(i)"
                     class="absolute top-1 right-1 w-5 h-5 rounded-full bg-slate-900/70 text-white hover:bg-rose-500 grid place-items-center disabled:opacity-40 disabled:cursor-not-allowed">
               <Icon name="close" class="w-3 h-3" />

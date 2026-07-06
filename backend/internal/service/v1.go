@@ -58,10 +58,10 @@ var (
 	ErrVideoNotReady    = errors.New("video is not ready yet")
 )
 
-// maxReferenceImageBytes bounds a single decoded reference image. 8 MB
+// maxReferenceImageBytes bounds a single decoded reference image. 20 MB
 // comfortably covers real photos/screenshots; anything larger is almost
 // certainly abuse or a mistake. Mirrors Python core/refs.py.
-const maxReferenceImageBytes = 8 * 1024 * 1024
+const maxReferenceImageBytes = 20 * 1024 * 1024
 
 type V1Service struct {
 	cfg      *config.Config
