@@ -898,7 +898,8 @@ func (c *Client) startImageGeneration(ctx context.Context, session tlsclient.Htt
 	// image generation task actually started" signal, so when it is absent (and
 	// nothing was streamed inline) treat the attempt as a transient upstream
 	// failure. That is retryable: a fresh submission reliably engages the pipeline,
-	// so the pool's same-account retry recovers instead of failing the request.
+	// so the pool retries the same account a few times and then fails over to
+	// another account (换号重试) instead of failing the request.
 	if !asyncStarted && len(fileIDs) == 0 && len(sedimentIDs) == 0 {
 		return "", nil, nil, fmt.Errorf("%w: image generation did not start (no async marker)", ErrTemporaryUpstream)
 	}

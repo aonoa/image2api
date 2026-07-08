@@ -2318,8 +2318,11 @@ func (s *V1Service) generateChatGPTImage(ctx context.Context, eventID string, mo
 		return nil, err
 	}
 
-	// Round-robin order; same-account retry on transient errors, fail over to the
-	// next account on auth/quota (see runPoolWithFailover).
+	// Round-robin order; on a transient upstream error (e.g. "image generation
+	// did not start (no async marker)") retry the same account a few times then
+	// FAIL OVER to the next account (tempFailover=true, capped at
+	// maxTempDeadAccounts) — never mark the account dead. Auth/quota fail over
+	// immediately (see runPoolWithFailover).
 	return s.runPoolWithFailover(ctx, eventID, "chatgpt", active, "image", func(token model.TokenAccount) ([]byte, error) {
 		data, _, genErr := s.chatgpt.GenerateImage(ctx, token.Value, in.Prompt, modelItem.ID, aspectRatio, resolution, refs)
 		if genErr == nil {
@@ -2330,7 +2333,7 @@ func (s *V1Service) generateChatGPTImage(ctx context.Context, eventID string, mo
 		return data, genErr
 	}, func(e error) (bool, bool, bool, bool) {
 		return errors.Is(e, chatgpt.ErrAuth), errors.Is(e, chatgpt.ErrQuotaExhausted), errors.Is(e, chatgpt.ErrTemporaryUpstream), false
-	}, nil, false) // chatgpt token IS the credential — no cookie to refresh
+	}, nil, true) // chatgpt token IS the credential — no cookie to refresh; switch accounts on transient errors
 }
 
 // leonardoResetAfter returns when a Leonardo account's daily free tokens renew.
