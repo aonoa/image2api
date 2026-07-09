@@ -297,8 +297,8 @@ func (c *Client) FetchSession(ctx context.Context, token string) (email, userID 
 // statsigEpoch is the challenge epoch (2023-05-01 00:00 UTC).
 const (
 	statsigEpoch          = 1682924400
-	defaultStatsigHeader  = "00e1ebcb2cac08f42039de1eb4d8534da581482fd09ccc95e06e3f03a3e9ddde02eb50b70c2efeaec6401f5d9b5ed329d4"
-	defaultStatsigSuffix  = "obfiowerehiring4fa399100100"
+	defaultStatsigHeader  = "00a1adb5012bd32f844f4426c62680d91c6129361eb9459a759710e179a888a99b21678e1f0b1e8952de6a6b3ca019f74b"
+	defaultStatsigSuffix  = "obfiowerehiringd244100f5c28f5c28f5c047ae147ae147b047ae147ae147b0f5c28f5c28f5c00"
 	defaultStatsigTrailer = 3
 )
 
