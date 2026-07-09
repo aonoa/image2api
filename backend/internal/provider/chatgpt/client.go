@@ -156,7 +156,7 @@ func ExtractAccountInfo(token string) map[string]any {
 }
 
 func (c *Client) FetchImageQuota(ctx context.Context, accessToken string) (map[string]any, error) {
-	session, err := c.newSession(accessToken)
+	session, err := c.newDirectSession(accessToken)
 	if err != nil {
 		return nil, err
 	}

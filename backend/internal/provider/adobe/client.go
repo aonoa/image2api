@@ -74,7 +74,7 @@ func (c *Client) SetProxy(proxy string) {
 }
 
 func (c *Client) ExchangeCookie(ctx context.Context, cookie string) (*CookieExchangeResult, error) {
-	sess, err := c.newTLSClient()
+	sess, err := c.newDirectTLSClient()
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +234,12 @@ func (c *Client) GenerateImage(ctx context.Context, token, modelID, prompt, aspe
 // in meta["video_url"] — used by the async /v1/videos job, which proxies that URL
 // on /content instead of persisting the file.
 func (c *Client) GenerateVideo(ctx context.Context, token, engine, prompt, aspectRatio string, durationSeconds int, resolution, referenceMode, upstreamModel string, blobIDs []string, downloadResult bool) ([]byte, map[string]any, error) {
-	sess, err := c.newTLSClient()
+	// Only the submit goes through the proxy; polling + download run on the local IP.
+	submitSess, err := c.newTLSClient()
+	if err != nil {
+		return nil, nil, err
+	}
+	pollSess, err := c.newDirectTLSClient()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -244,12 +249,12 @@ func (c *Client) GenerateVideo(ctx context.Context, token, engine, prompt, aspec
 	if engine == "firefly-video" {
 		endpoint = fireflyVideoSubmitURL
 	}
-	respBody, pollURL, err := c.submitVideo(ctx, sess, token, endpoint, payload)
+	respBody, pollURL, err := c.submitVideo(ctx, submitSess, token, endpoint, payload)
 	if err != nil {
 		return nil, nil, err
 	}
 	_ = respBody
-	meta, data, pollErr := c.pollVideo(ctx, sess, token, pollURL, downloadResult)
+	meta, data, pollErr := c.pollVideo(ctx, pollSess, token, pollURL, downloadResult)
 	if pollErr != nil {
 		return nil, nil, pollErr
 	}
@@ -261,7 +266,7 @@ func (c *Client) FetchAccountProfile(ctx context.Context, token string) (map[str
 	if token == "" {
 		return map[string]any{}, nil
 	}
-	sess, err := c.newTLSClient()
+	sess, err := c.newDirectTLSClient()
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +351,7 @@ func (c *Client) FetchCreditsBalance(ctx context.Context, token string) (map[str
 		}, nil
 	}
 
-	sess, err := c.newTLSClient()
+	sess, err := c.newDirectTLSClient()
 	if err != nil {
 		return nil, err
 	}

@@ -102,7 +102,7 @@ func (c *Client) FetchCreditsBalance(ctx context.Context, token string) (map[str
 		return unknownBalance("no team id"), nil
 	}
 
-	client, err := c.newTLSClient()
+	client, err := c.newDirectTLSClient()
 	if err != nil {
 		return nil, err
 	}

@@ -22,7 +22,7 @@ const (
 // ensureProject returns a flux project id for the account: the first existing
 // project, or a freshly created one. Generation requires a project.
 func (c *Client) ensureProject(ctx context.Context, cookie string) (string, error) {
-	body, status, err := c.apiGet(ctx, cookie, "/api/flux-projects")
+	body, status, err := c.apiGetP(ctx, cookie, "/api/flux-projects", false)
 	if err != nil {
 		return "", fmt.Errorf("%w: list projects: %s", ErrTemporaryUpstream, err.Error())
 	}
@@ -309,6 +309,7 @@ func (c *Client) apiPostP(ctx context.Context, cookie, path, contentType string,
 }
 
 func (c *Client) apiPostJSON(ctx context.Context, cookie, path string, payload any) ([]byte, int, error) {
+	// project bootstrap runs on the local IP; only the generate submit uses the proxy.
 	b, _ := json.Marshal(payload)
-	return c.apiPost(ctx, cookie, path, "application/json", b)
+	return c.apiPostP(ctx, cookie, path, "application/json", b, false)
 }

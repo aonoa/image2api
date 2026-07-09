@@ -91,7 +91,7 @@ func (c *Client) GetSession(ctx context.Context, cookie string) (*Session, error
 	}
 	c.mu.Unlock()
 
-	client, err := c.newTLSClient()
+	client, err := c.newDirectTLSClient()
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +205,7 @@ func (c *Client) FetchCreditsBalance(ctx context.Context, cookie string) (map[st
 		"variables":     map[string]any{"sub": sess.CognitoSub},
 		"query":         qGetTokens,
 	})
-	body, status, err := c.graphql(ctx, sess.AccessToken, payload)
+	body, status, err := c.graphqlP(ctx, sess.AccessToken, payload, false)
 	if err != nil {
 		return unknownBalance("network: " + err.Error()), nil
 	}

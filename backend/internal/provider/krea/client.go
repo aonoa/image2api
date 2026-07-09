@@ -139,7 +139,7 @@ func (c *Client) RefreshIfNeeded(ctx context.Context, cookie string) (string, bo
 }
 
 func (c *Client) refreshPost(ctx context.Context, refreshToken string) ([]byte, int, error) {
-	client, err := c.newTLSClient()
+	client, err := c.newDirectTLSClient()
 	if err != nil {
 		return nil, 0, err
 	}
@@ -307,7 +307,7 @@ func (c *Client) FetchCreditsBalance(ctx context.Context, cookie string) (map[st
 	defer cancel()
 	// NOTE: no /app here — the heavy SSR activation is done separately (on recovery
 	// and at generation via Activate). This probe just reads the current balance.
-	body, status, err := c.apiGet(probeCtx, cookie, "/api/billing-data")
+	body, status, err := c.apiGetP(probeCtx, cookie, "/api/billing-data", false)
 	if err != nil {
 		return unknownBalance("network: " + err.Error()), nil
 	}
@@ -366,7 +366,7 @@ func (c *Client) Activate(ctx context.Context, cookie string) {
 	}
 	actCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
 	defer cancel()
-	_, _, _ = c.apiGet(actCtx, cookie, "/app")
+	_, _, _ = c.apiGetP(actCtx, cookie, "/app", false)
 	c.mu.Lock()
 	c.actAt[key] = time.Now().Unix()
 	c.mu.Unlock()

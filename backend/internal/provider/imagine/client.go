@@ -264,7 +264,7 @@ func (c *Client) RefreshIfNeeded(ctx context.Context, cred string) (string, bool
 }
 
 func (c *Client) refreshPost(ctx context.Context, refreshToken string) ([]byte, int, error) {
-	client, err := c.newTLSClient()
+	client, err := c.newDirectTLSClient()
 	if err != nil {
 		return nil, 0, err
 	}
@@ -305,7 +305,7 @@ func (c *Client) FetchCreditsBalance(ctx context.Context, cred string) (map[stri
 		return unknownBalance("bad credential"), nil
 	}
 	userID := userIDFromToken(cr.Token)
-	body, status, err := c.apiGet(ctx, cr.Token, apiBase+"/v1/credit?org_id="+userID)
+	body, status, err := c.apiGetP(ctx, cr.Token, apiBase+"/v1/credit?org_id="+userID, false)
 	if err != nil {
 		return unknownBalance("network: " + err.Error()), nil
 	}
