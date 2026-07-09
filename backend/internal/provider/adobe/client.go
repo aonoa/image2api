@@ -532,10 +532,9 @@ func (c *Client) submitImage(ctx context.Context, sess *tlsSession, token, promp
 }
 
 func (c *Client) pollImage(ctx context.Context, sess *tlsSession, token, pollURL string) (map[string]any, []byte, error) {
-	start := time.Now()
 	for {
-		if time.Since(start) > 3*time.Minute {
-			return nil, nil, errors.New("adobe generation timed out")
+		if err := ctx.Err(); err != nil {
+			return nil, nil, fmt.Errorf("adobe generation timed out: %w", err)
 		}
 
 		req, err := http.NewRequest(http.MethodGet, pollURL, nil)
@@ -712,10 +711,9 @@ func (c *Client) submitVideo(ctx context.Context, sess *tlsSession, token, endpo
 }
 
 func (c *Client) pollVideo(ctx context.Context, sess *tlsSession, token, pollURL string, downloadResult bool) (map[string]any, []byte, error) {
-	start := time.Now()
 	for {
-		if time.Since(start) > 10*time.Minute {
-			return nil, nil, errors.New("adobe video generation timed out")
+		if err := ctx.Err(); err != nil {
+			return nil, nil, fmt.Errorf("adobe video generation timed out: %w", err)
 		}
 
 		req, err := http.NewRequest(http.MethodGet, pollURL, nil)
