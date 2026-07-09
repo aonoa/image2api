@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	http "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
 	"github.com/google/uuid"
 )
@@ -127,7 +126,7 @@ func (c *Client) createImageTask(ctx context.Context, client tlsclient.HttpClien
 	if len(refImages) > 0 {
 		opts["reference_images"] = refImages
 	}
-	res, err := c.apiJSON(ctx, client, token, teamID, http.MethodPost, "/v1/tasks", map[string]any{
+	res, err := c.submitTask(ctx, client, token, teamID, map[string]any{
 		"taskType":  "gemini_3_1_flash_image",
 		"options":   opts,
 		"asTeamId":  jsonNumberOrString(teamID),

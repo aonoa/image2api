@@ -213,7 +213,7 @@ func (c *Client) createTask(ctx context.Context, client tlsclient.HttpClient, to
 	if assetGroupID != "" {
 		opts["assetGroupId"] = assetGroupID
 	}
-	res, err := c.apiJSON(ctx, client, token, teamID, http.MethodPost, "/v1/tasks", map[string]any{
+	res, err := c.submitTask(ctx, client, token, teamID, map[string]any{
 		"taskType":  "gen4_turbo",
 		"options":   opts,
 		"asTeamId":  jsonNumberOrString(teamID),
@@ -269,6 +269,24 @@ func (c *Client) pollTask(ctx context.Context, client tlsclient.HttpClient, toke
 			return "", ctx.Err()
 		}
 	}
+}
+
+// submitTask POSTs a /v1/tasks create, retrying a few times on transient
+// (network / 5xx) failures. A dropped proxy connection ("EOF") on the submit
+// would otherwise fail the whole generation even though a quick retry succeeds.
+func (c *Client) submitTask(ctx context.Context, client tlsclient.HttpClient, token, teamID string, body map[string]any) (map[string]any, error) {
+	var res map[string]any
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		res, err = c.apiJSON(ctx, client, token, teamID, http.MethodPost, "/v1/tasks", body)
+		if err == nil || !errors.Is(err, ErrTemporaryUpstream) {
+			return res, err
+		}
+		if sleepCtx(ctx, time.Duration(attempt+1)*time.Second) != nil {
+			return nil, ctx.Err()
+		}
+	}
+	return res, err
 }
 
 // apiJSON performs an authed JSON request against the Runway API and returns the
