@@ -91,6 +91,7 @@ const uploadMaxRetries = 5
 // its original (non-temporary) classification so the account is not penalized
 // for a network blip.
 func (c *Client) UploadImage(ctx context.Context, token string, content []byte, contentType, engine string) (string, error) {
+	// Reference-image upload runs on the local IP (not the proxy).
 	body, err, retryable := c.uploadImageOnce(ctx, token, content, contentType, engine)
 	for attempt := 0; err != nil && retryable && attempt < uploadMaxRetries && ctx.Err() == nil; attempt++ {
 		body, err, retryable = c.uploadImageOnce(ctx, token, content, contentType, engine)
@@ -120,7 +121,7 @@ func (c *Client) UploadImage(ctx context.Context, token string, content []byte, 
 // body plus whether a failure is retryable (transport error / 429/451/5xx).
 // Auth failures (401/403) and other non-200s are not retryable.
 func (c *Client) uploadImageOnce(ctx context.Context, token string, content []byte, contentType, engine string) ([]byte, error, bool) {
-	sess, err := c.newTLSClient()
+	sess, err := c.newDirectTLSClient()
 	if err != nil {
 		return nil, err, false
 	}
@@ -174,7 +175,13 @@ func (c *Client) uploadImageOnce(ctx context.Context, token string, content []by
 }
 
 func (c *Client) GenerateImage(ctx context.Context, token, modelID, prompt, aspectRatio, resolution string, blobIDs []string) ([]byte, map[string]any, error) {
-	sess, err := c.newTLSClient()
+	// Only the generate submit goes through the proxy; polling + download run on
+	// the local IP.
+	submitSess, err := c.newTLSClient()
+	if err != nil {
+		return nil, nil, err
+	}
+	pollSess, err := c.newDirectTLSClient()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -192,9 +199,9 @@ func (c *Client) GenerateImage(ctx context.Context, token, modelID, prompt, aspe
 		candidates = BuildImagePayloadCandidates(modelID, prompt, aspectRatio, resolution, blobIDs)
 	}
 	for _, payload := range candidates {
-		respBody, pollURL, err := c.submitImage(ctx, sess, token, prompt, endpoint, payload)
+		respBody, pollURL, err := c.submitImage(ctx, submitSess, token, prompt, endpoint, payload)
 		if err == nil {
-			meta, data, pollErr := c.pollImage(ctx, sess, token, pollURL)
+			meta, data, pollErr := c.pollImage(ctx, pollSess, token, pollURL)
 			if pollErr != nil {
 				return nil, nil, pollErr
 			}
@@ -892,15 +899,26 @@ type tlsSession struct {
 	fp     fingerprint
 }
 
+// newTLSClient builds a session that routes through the configured proxy (when
+// set). newDirectTLSClient builds one that always uses the local IP. Only the
+// image-generation submit goes through the proxy; reference-image upload,
+// polling and result download run on the local IP.
 func (c *Client) newTLSClient() (*tlsSession, error) {
-	fp := randomFingerprint()
+	return c.newTLSSession(randomFingerprint(), true)
+}
+
+func (c *Client) newDirectTLSClient() (*tlsSession, error) {
+	return c.newTLSSession(randomFingerprint(), false)
+}
+
+func (c *Client) newTLSSession(fp fingerprint, useProxy bool) (*tlsSession, error) {
 	options := []tlsclient.HttpClientOption{
 		tlsclient.WithTimeoutSeconds(60),
 		tlsclient.WithClientProfile(fp.profile),
 		tlsclient.WithNotFollowRedirects(),
 		tlsclient.WithRandomTLSExtensionOrder(),
 	}
-	if c.proxy != "" {
+	if useProxy && c.proxy != "" {
 		options = append(options, tlsclient.WithProxyUrl(c.proxy))
 	}
 	client, err := tlsclient.NewHttpClient(tlsclient.NewNoopLogger(), options...)
