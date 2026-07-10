@@ -453,6 +453,17 @@ func (h *UserGenerationHandler) catalogEntries(c *gin.Context) ([]gin.H, error) 
 			"description":          "Adobe Flux Kontext Max",
 		},
 		{
+			"id":                   "nano-banana-2",
+			"provider":             "runway",
+			"type":                 "image",
+			"ratios":               []string{"1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"},
+			"resolutions":          []string{"1K", "2K", "4K"},
+			"image_to_image":       true,
+			"max_reference_images": 6,
+			"reference_mode":       "asset",
+			"description":          "Runway Nano Banana 2 (图/参考图)",
+		},
+		{
 			"id":                   "nano-banana-pro",
 			"provider":             "runway",
 			"type":                 "image",
@@ -611,6 +622,15 @@ func (h *UserGenerationHandler) publicModels() ([]gin.H, error) {
 			"ratios":      []string{"1:1", "16:9", "9:16", "4:3", "3:4"},
 			"resolutions": []string{"1K"},
 			"description": "Adobe Flux Kontext Max",
+			"stub":        false,
+		},
+		{
+			"id":          "nano-banana-2",
+			"provider":    "runway",
+			"kind":        "image",
+			"ratios":      []string{"1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"},
+			"resolutions": []string{"1K", "2K", "4K"},
+			"description": "Runway Nano Banana 2",
 			"stub":        false,
 		},
 		{

@@ -555,7 +555,7 @@ func (s *V1Service) prepareImageExecution(ctx context.Context, principal *APIPri
 		}
 		imageBytes = b
 	case "runway":
-		b, execErr := s.generateRunwayImage(genCtx, eventID, modelItem, in, resolution)
+		b, execErr := s.generateRunwayImage(genCtx, eventID, modelItem, in, aspectRatio, resolution)
 		if execErr != nil {
 			_ = s.refundIfNeeded(ctx, principal, eventID, price)
 			_ = s.events.UpdateStatus(ctx, eventID, "failed", execErr.Error(), 0)
@@ -2137,14 +2137,14 @@ func (s *V1Service) generateGrokVideo(ctx context.Context, eventID string, model
 	return nil, "", lastErr
 }
 
-// generateRunwayImage runs the Runway "Nano Banana Pro" (workflow_gemini_image /
-// gemini-3-pro-image-preview) image pipeline across the runway pool. Unlike the
+// generateRunwayImage runs the Runway gemini image pipeline (Nano Banana Pro or
+// Nano Banana 2, selected by the model id) across the runway pool. Unlike the
 // video path it does NOT pre-deduct credits: it simply round-robins the pool and
 // generates. Per ops decision an out-of-credits account is treated like a dead
 // 401 — marked dead (status=disabled) and skipped — because Runway credits don't
 // refill daily, so a "quota" mark (which the maintenance loop would revive) is
 // wrong. Reference images (up to the model's max) are uploaded per attempt.
-func (s *V1Service) generateRunwayImage(ctx context.Context, eventID string, modelItem *model.ModelConfig, in V1ImageRequest, resolution string) ([]byte, error) {
+func (s *V1Service) generateRunwayImage(ctx context.Context, eventID string, modelItem *model.ModelConfig, in V1ImageRequest, aspectRatio, resolution string) ([]byte, error) {
 	if s.runway == nil {
 		return nil, errors.New("runway client not configured")
 	}
@@ -2203,7 +2203,7 @@ func (s *V1Service) generateRunwayImage(ctx context.Context, eventID string, mod
 			if token.Meta != nil {
 				teamID = strings.TrimSpace(stringValue(token.Meta["team_id"]))
 			}
-			d, _, genErr := s.runway.GenerateImage(ctx, token.Value, teamID, in.Prompt, imageSize, refs)
+			d, _, genErr := s.runway.GenerateImage(ctx, token.Value, teamID, modelItem.ID, in.Prompt, aspectRatio, imageSize, refs)
 			if genErr == nil {
 				_, _ = s.tokens.Update(ctx, "runway", token.ID, map[string]any{
 					"last_used_at":  time.Now(),
