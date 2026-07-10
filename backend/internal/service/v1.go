@@ -1379,19 +1379,15 @@ func (s *V1Service) finishUnimplementedEvent(ctx context.Context, eventID string
 	return s.events.UpdateStatus(ctx, eventID, "failed", "generation executor not implemented yet", 0)
 }
 
-// maxSameAccountAttempts is how many times ONE account is retried for the same
-// request before that account is abandoned. Transient/request errors stay on the
-// same account; account-level errors (auth/quota) skip straight to the next.
-const maxSameAccountAttempts = 3
 
 // grokConcurrencyPerAccount is how many simultaneous generations one grok account
 // may run (grok tolerates 10, unlike the 1-per-account default elsewhere).
 const grokConcurrencyPerAccount = 10
 
 // maxTempDeadAccounts caps how many accounts the "temporary error = fail over"
-// policy (tempFailover, used by adobe) may burn per request before giving up, so
-// an upstream-wide blip ("system under load") can't fan a single request out
-// across the whole pool. After this many accounts fail this way, the request fails.
+// policy may burn per request before giving up, so an upstream-wide blip
+// ("system under load") can't fan a single request out across the whole pool.
+// After this many accounts fail this way, the request fails.
 const maxTempDeadAccounts = 3
 
 // runPoolWithFailover drives a generation across a round-robin-ordered account
@@ -1403,14 +1399,9 @@ const maxTempDeadAccounts = 3
 //   - 认证失效 auth → refresh the token from its cookie and retry ONCE with the
 //     fresh token; if it still auth-fails (or there's nothing to refresh, e.g.
 //     chatgpt's JWT IS the credential), mark the account and fail over.
-//   - 上游临时 temporary → behavior depends on tempFailover:
-//   - tempFailover=false (default): retry the SAME account up to
-//     maxSameAccountAttempts times (not counted); if still failing, STOP
-//     (no fan-out — an upstream-wide blip fails identically everywhere).
-//   - tempFailover=true (adobe): disable+mark the account dead and fail over
-//     to the next account (ops policy: shed accounts that hit upstream errors),
-//     capped at maxTempDeadAccounts accounts so a pool-wide blip can't fan
-//     a single request out across everything.
+//   - 上游临时 temporary → record the failure (no disable/dead) and FAIL OVER to
+//     the next account immediately, capped at maxTempDeadAccounts accounts so a
+//     pool-wide blip can't fan a single request out across everything.
 //   - 参数错 / request-level (anything else) → return immediately, no retry, no
 //     account penalty (the account isn't at fault).
 //
@@ -1469,10 +1460,11 @@ func (s *V1Service) runPoolWithFailover(ctx context.Context, eventID, pool strin
 	return nil, lastErr
 }
 
-// tryAccount runs one account's attempt with the same-account retry policy used
-// by the pool: 额度耗尽/认证失效 → mark + failover; 上游临时 → retry ≤3 same account;
-// 参数错 → fail fast. Returns (data, err, failover) — failover=true means move on
-// to the next account. The per-account concurrency gate is held by the caller.
+// tryAccount runs one account's attempt with the pool's retry policy:
+// 额度耗尽/认证失效 → mark + failover; 上游临时 → record failure + failover (capped
+// via the tempDead return); 参数错 → fail fast. Returns (data, err, failover,
+// tempDead) — failover=true means move on to the next account. The per-account
+// concurrency gate is held by the caller.
 func (s *V1Service) tryAccount(ctx context.Context, eventID, pool string, token model.TokenAccount, kind string,
 	attempt func(token model.TokenAccount) ([]byte, error),
 	classify func(error) (isAuth, isQuota, isTemporary, isDead bool),
@@ -1482,8 +1474,6 @@ func (s *V1Service) tryAccount(ctx context.Context, eventID, pool string, token 
 	_ = s.events.SetAccount(ctx, eventID, token.ID, token.AccountEmail)
 	_ = s.tokens.TouchLastUsed(ctx, token.ID)
 	authRefreshed := false
-	tempAttempts := 0
-	fatalAttempts := 0
 	for {
 		data, err := attempt(token)
 		if err == nil {
@@ -1511,26 +1501,16 @@ func (s *V1Service) tryAccount(ctx context.Context, eventID, pool string, token 
 			s.markTokenFailure(ctx, pool, token, kind, true, false)
 			return nil, err, true, false
 		}
-		// Fatal / (temporary under adobe's failover policy) upstream error.
+		// Fatal / temporary-under-failover-policy upstream error.
 		if isDead || (isTemp && tempFailover) {
 			if tempFailover {
 				// Ops policy (adobe): NEVER kill on these upstream errors — a
 				// genuinely bad account and a transient Adobe blip (429/5xx/
 				// overload) look the same, and killing wipes healthy accounts.
-				// First retry the SAME account a few times; if still failing, just
-				// record the failure and fail over to the next account (no
+				// Record the failure and fail over to the next account (no
 				// disable/dead). The 4th return value caps how many accounts one
 				// request may burn this way (maxTempDeadAccounts) so a pool-wide
 				// blip can't fan a single request across the whole pool.
-				fatalAttempts++
-				if fatalAttempts < maxSameAccountAttempts {
-					select {
-					case <-time.After(time.Duration(fatalAttempts) * time.Second):
-						continue
-					case <-ctx.Done():
-						return nil, err, false, false
-					}
-				}
 				s.markTokenFailure(ctx, pool, token, kind, false, false)
 				return nil, err, true, true
 			}
@@ -1538,19 +1518,11 @@ func (s *V1Service) tryAccount(ctx context.Context, eventID, pool string, token 
 			return nil, err, true, true
 		}
 		if isTemp {
-			tempAttempts++
-			if tempAttempts < maxSameAccountAttempts {
-				// Short linear backoff (1s, 2s) so an overloaded/rate-limited upstream
-				// gets a moment to recover before the same-account retry, instead of
-				// hammering it instantly.
-				select {
-				case <-time.After(time.Duration(tempAttempts) * time.Second):
-				case <-ctx.Done():
-					return nil, err, false, false
-				}
-				continue
-			}
-			return nil, err, false, false // exhausted; no fan-out
+			// Temporary upstream error → record the failure (no disable/dead) and
+			// fail over to the NEXT account, capped via the tempDead return so a
+			// pool-wide blip can't fan one request across the whole pool.
+			s.markTokenFailure(ctx, pool, token, kind, false, false)
+			return nil, err, true, true
 		}
 		return nil, err, false, false // 参数错 / request-level
 	}
@@ -1658,9 +1630,9 @@ func (s *V1Service) generateAdobeVideo(ctx context.Context, eventID string, mode
 	engine, upstreamModel := resolveAdobeVideoEngine(modelItem.ID)
 	referenceMode := defaultString(strings.TrimSpace(modelItem.ReferenceMode), "frame")
 
-	// Round-robin order; same-account retry on transient errors, fail over to the
-	// next account on auth/quota; temporary upstream errors fail over too without
-	// penalizing the account (tempFailover, capped at maxTempDeadAccounts). videoURL is
+	// Round-robin order; fail over to the next account on auth/quota; temporary
+	// upstream errors fail over too without penalizing the account (tempFailover,
+	// capped at maxTempDeadAccounts). videoURL is
 	// captured from the successful attempt's meta (the upstream presigned URL).
 	var videoURL string
 	data, err := s.runPoolWithFailover(ctx, eventID, "adobe", active, "video", func(token model.TokenAccount) ([]byte, error) {
@@ -2341,10 +2313,9 @@ func (s *V1Service) generateChatGPTImage(ctx context.Context, eventID string, mo
 	}
 
 	// Round-robin order; on a transient upstream error (e.g. "image generation
-	// did not start (no async marker)") retry the same account a few times then
-	// FAIL OVER to the next account (tempFailover=true, capped at
-	// maxTempDeadAccounts) — never mark the account dead. Auth/quota fail over
-	// immediately (see runPoolWithFailover).
+	// did not start (no async marker)") FAIL OVER to the next account
+	// (tempFailover=true, capped at maxTempDeadAccounts) — never mark the
+	// account dead. Auth/quota fail over immediately (see runPoolWithFailover).
 	return s.runPoolWithFailover(ctx, eventID, "chatgpt", active, "image", func(token model.TokenAccount) ([]byte, error) {
 		data, _, genErr := s.chatgpt.GenerateImage(ctx, token.Value, in.Prompt, modelItem.ID, aspectRatio, resolution, refs)
 		if genErr == nil {

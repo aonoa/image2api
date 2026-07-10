@@ -271,22 +271,11 @@ func (c *Client) pollTask(ctx context.Context, client tlsclient.HttpClient, toke
 	}
 }
 
-// submitTask POSTs a /v1/tasks create, retrying a few times on transient
-// (network / 5xx) failures. A dropped proxy connection ("EOF") on the submit
-// would otherwise fail the whole generation even though a quick retry succeeds.
+// submitTask POSTs a /v1/tasks create. Transient (network / 5xx) failures
+// surface as ErrTemporaryUpstream so the pool fails over to the NEXT account
+// (换号重试) instead of retrying this one.
 func (c *Client) submitTask(ctx context.Context, client tlsclient.HttpClient, token, teamID string, body map[string]any) (map[string]any, error) {
-	var res map[string]any
-	var err error
-	for attempt := 0; attempt < 3; attempt++ {
-		res, err = c.apiJSON(ctx, client, token, teamID, http.MethodPost, "/v1/tasks", body)
-		if err == nil || !errors.Is(err, ErrTemporaryUpstream) {
-			return res, err
-		}
-		if sleepCtx(ctx, time.Duration(attempt+1)*time.Second) != nil {
-			return nil, ctx.Err()
-		}
-	}
-	return res, err
+	return c.apiJSON(ctx, client, token, teamID, http.MethodPost, "/v1/tasks", body)
 }
 
 // apiJSON performs an authed JSON request against the Runway API and returns the

@@ -80,9 +80,9 @@ func (c *Client) GenerateVideo(ctx context.Context, token, prompt, aspectRatio, 
 
 	// grok occasionally accepts the conversation (HTTP 200) but closes the stream
 	// after only the conversation object — no progress events, no videoUrl. This
-	// is transient, so retry the whole create-post + stream a few times before
-	// giving up. Real out-of-credits / auth errors are returned immediately.
-	const maxAttempts = 5
+	// is transient and surfaces as ErrTemporaryUpstream so the caller fails over
+	// to the NEXT account (换号重试) instead of retrying this one.
+	const maxAttempts = 1
 	var (
 		postID   string
 		artifact string
