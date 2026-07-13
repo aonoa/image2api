@@ -448,7 +448,9 @@ func mapStatus(path string, status int, raw []byte) error {
 	case status == 403 && isBotChallenge(string(raw)):
 		// grok bot-detection or a Cloudflare challenge page ("Just a moment…"),
 		// NOT a dead token — transient, so a good account isn't killed by an
-		// IP/anti-bot hiccup.
+		// IP/anti-bot hiccup. A statsig anti-bot rejection means the recipe likely
+		// went stale on a reship; kick the headless refresher to re-capture.
+		TriggerStatsigRefresh()
 		return fmt.Errorf("%w: %s 403 %s", ErrTemporaryUpstream, path, clip(raw, 160))
 	case status == 401 || status == 403:
 		return fmt.Errorf("%w: %s %d %s", ErrAuth, path, status, clip(raw, 160))

@@ -18,6 +18,8 @@ const pageSize = ref(20)
 
 const showAdd = ref(false)
 const editing = ref(null)
+const recharging = ref(null)   // the user whose credits are being topped up
+const rechargeAmt = ref(0)
 const toast = ref('')
 
 const addForm = ref({ email: '', name: '', password: '', role: 'user', credits: 0, notes: '', concurrency_group_id: '' })
@@ -132,9 +134,11 @@ async function saveEdit() {
   // Email + 用户名 are intentionally NOT in the patch — they're displayed
   // read-only in the form, and the admin shouldn't be in the habit of
   // rewriting a user's identity from this page.
+  // 积分 intentionally NOT patched here — editing must never touch the live
+  // balance (a stale snapshot would clobber credits the user spent meanwhile).
+  // Credits are adjusted only through the atomic 充值 button (/credits).
   const patch = {
     status: u.status,
-    credits: u.credits,
     role: u.role,
     notes: u.notes || '',
     concurrency_group_id: u.concurrency_group_id || '',
@@ -191,6 +195,15 @@ async function quickCredits(u, delta) {
   const r = await api(`/users/${u.id}/credits`, jsonBody('POST', { delta }))
   if (r.ok) { flash(`已${delta > 0 ? '增加' : '扣除'} ${Math.abs(delta).toLocaleString('en-US')} 积分`); load() }
   else flash(r.data?.detail || '调整失败')
+}
+
+function openRecharge(u) { recharging.value = u; rechargeAmt.value = 0 }
+async function doRecharge() {
+  const delta = Math.round(Number(rechargeAmt.value) || 0)
+  if (!delta) { flash('请输入积分数量'); return }
+  // Atomic increment on the server — never overwrites the live balance.
+  await quickCredits(recharging.value, delta)
+  recharging.value = null; rechargeAmt.value = 0
 }
 </script>
 
@@ -263,12 +276,13 @@ async function quickCredits(u, delta) {
         <button v-if="!items.length" @click="showAdd = true" class="btn-soft mt-1">新建第一个</button>
       </div>
 
-      <table v-else class="w-full text-sm table-fixed">
+      <div v-else class="overflow-x-auto">
+      <table class="w-full text-sm table-fixed min-w-[1360px]">
         <colgroup>
           <col class="w-9" />      <!-- select -->
-          <col class="w-40" />     <!-- username -->
+          <col class="w-36" />     <!-- username -->
           <col />                  <!-- email (flex) -->
-          <col class="w-36" />     <!-- notes -->
+          <col class="w-24" />     <!-- notes -->
           <col class="w-28" />     <!-- concurrency -->
           <col class="w-20" />     <!-- role -->
           <col class="w-16" />     <!-- status switch -->
@@ -279,7 +293,7 @@ async function quickCredits(u, delta) {
           <col class="w-28" />     <!-- registered -->
           <col class="w-28" />     <!-- last login -->
           <col class="w-32" />     <!-- login IP -->
-          <col class="w-24" />     <!-- actions -->
+          <col class="w-32" />     <!-- actions -->
         </colgroup>
         <thead>
           <tr class="text-[10px] uppercase tracking-[0.2em] text-white/40 border-b border-white/[0.06]">
@@ -287,7 +301,7 @@ async function quickCredits(u, delta) {
               <input type="checkbox" :checked="allSelected" @change="toggleSelectAll"
                      class="chk" title="全选" />
             </th>
-            <th class="text-left px-5 py-3 font-medium">用户名</th>
+            <th class="text-left px-3 py-3 font-medium">用户名</th>
             <th class="text-left px-3 py-3 font-medium">邮箱</th>
             <th class="text-left px-3 py-3 font-medium">备注</th>
             <th class="text-left px-3 py-3 font-medium">并发</th>
@@ -310,7 +324,7 @@ async function quickCredits(u, delta) {
               <input type="checkbox" :checked="selected.has(u.id)" @change="toggleSelect(u.id)" @click.stop
                      class="chk" />
             </td>
-            <td class="px-5 py-3.5 align-middle text-sm font-medium text-white/90 truncate" :title="u.name || '—'">
+            <td class="px-3 py-3.5 align-middle text-sm font-medium text-white/90 truncate" :title="u.name || '—'">
               {{ u.name || '—' }}
             </td>
             <td class="px-3 py-3.5 align-middle text-xs text-white/75 truncate" :title="u.email">
@@ -376,6 +390,9 @@ async function quickCredits(u, delta) {
             </td>
             <td class="px-3 py-3.5 align-middle text-right whitespace-nowrap">
               <div class="inline-flex items-center gap-1">
+                <button @click="openRecharge(u)" class="act" title="充值">
+                  <Icon name="spark" class="w-3.5 h-3.5" />
+                </button>
                 <button @click="editing = JSON.parse(JSON.stringify(u))" class="act" title="编辑">
                   <Icon name="config" class="w-3.5 h-3.5" />
                 </button>
@@ -387,6 +404,7 @@ async function quickCredits(u, delta) {
           </tr>
         </tbody>
       </table>
+      </div>
 
       <!-- pagination -->
       <div v-if="!loading && totalPages > 1"
@@ -485,10 +503,6 @@ async function quickCredits(u, delta) {
             <SelectMenu v-else v-model="editing.role" :options="ROLE_OPTIONS" />
           </div>
           <div>
-            <label class="lbl">积分</label>
-            <input v-model.number="editing.credits" type="number" min="0" step="1" class="field" />
-          </div>
-          <div>
             <label class="lbl">并发分组 <span class="text-white/35">(限制同时生成数)</span></label>
             <SelectMenu v-model="editing.concurrency_group_id" :options="cgroupOptions" placeholder="选择分组" />
           </div>
@@ -503,6 +517,38 @@ async function quickCredits(u, delta) {
           <div class="flex justify-end gap-2 pt-2">
             <button @click="editing = null" class="btn-soft">取消</button>
             <button @click="saveEdit" class="btn-primary">保存</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recharge modal -->
+    <div v-if="recharging"
+         class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto"
+         @click.self="recharging = null">
+      <div class="card !shadow-2xl my-12 w-full max-w-sm">
+        <div class="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
+          <h2 class="text-sm font-semibold">充值积分</h2>
+          <button @click="recharging = null" class="text-white/40 hover:text-white">
+            <Icon name="close" class="w-5 h-5" />
+          </button>
+        </div>
+        <div class="p-5 space-y-3">
+          <div>
+            <label class="lbl">用户</label>
+            <input :value="recharging.email || recharging.name || recharging.id" disabled class="field font-mono" />
+          </div>
+          <div>
+            <label class="lbl">当前积分</label>
+            <input :value="points(recharging.credits).toLocaleString('en-US')" disabled class="field tabular-nums" />
+          </div>
+          <div>
+            <label class="lbl">充值数量 <span class="text-white/35">(正数增加,负数扣除)</span></label>
+            <input v-model.number="rechargeAmt" type="number" step="1" class="field" placeholder="例如 1000" autofocus />
+          </div>
+          <div class="flex justify-end gap-2 pt-2">
+            <button @click="recharging = null" class="btn-soft">取消</button>
+            <button @click="doRecharge" class="btn-primary">确认充值</button>
           </div>
         </div>
       </div>

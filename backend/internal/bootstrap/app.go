@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"backend/internal/config"
@@ -122,6 +123,11 @@ func NewApp(ctx context.Context) (*App, error) {
 	kreaClient := krea.NewClient("")
 	imagineClient := imagine.NewClient("")
 	grokClient := grok.NewClient("")
+	// Keep grok's x-statsig-id anti-bot recipe current by reading grok's own
+	// headless-browser signer output. Event-driven: seed from the persisted
+	// recipe, capture once at startup, then re-capture only on an anti-bot 403
+	// (a reship made the recipe stale). No polling.
+	startGrokStatsigRefresh(siteRepo)
 	customClient := custom.NewClient()
 	v1Svc := service.NewV1Service(cfg, modelRepo, userRepo, eventRepo, tokenRepo, siteRepo, cgroupRepo, concSvc, adobeClient, chatGPTClient, runwayClient, leonardoClient, kreaClient, imagineClient, grokClient, customClient, rustfsClient)
 	siteSvc := service.NewSiteService(siteRepo, cfg.AppTitle)
@@ -173,6 +179,33 @@ func NewApp(ctx context.Context) (*App, error) {
 		Engine:            engine,
 		maintenanceCancel: loopCancel,
 	}, nil
+}
+
+// startGrokStatsigRefresh wires grok's headless x-statsig-id refresher to the
+// site-settings store (persisted across restarts) with an app-lifetime context.
+func startGrokStatsigRefresh(siteRepo *repo.SiteSettingRepository) {
+	const kHeader, kSuffix, kTrailer = "grok.statsig.header", "grok.statsig.suffix", "grok.statsig.trailer"
+	grok.StartStatsigAutoRefresh(context.Background(), 0,
+		func(ctx context.Context) (string, string, int, bool) {
+			h, _ := siteRepo.GetValue(ctx, kHeader)
+			s, _ := siteRepo.GetValue(ctx, kSuffix)
+			tv, _ := siteRepo.GetValue(ctx, kTrailer)
+			if h == "" || s == "" {
+				return "", "", 0, false
+			}
+			t, _ := strconv.Atoi(tv)
+			return h, s, t, true
+		},
+		func(ctx context.Context, h, s string, t int) {
+			if err := siteRepo.UpsertValues(ctx, map[string]string{
+				kHeader:  h,
+				kSuffix:  s,
+				kTrailer: strconv.Itoa(t),
+			}); err != nil {
+				log.Printf("grok statsig: persist recipe failed: %v", err)
+			}
+		},
+	)
 }
 
 func (a *App) Close() error {
