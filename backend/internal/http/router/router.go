@@ -55,6 +55,8 @@ func New(cfg *config.Config, auth *service.AuthService, handlers Handlers) *gin.
 	engine.POST("/v1/videos", handlers.V1.CreateVideo)
 	engine.GET("/v1/videos/:id", handlers.V1.GetVideo)
 	engine.GET("/v1/videos/:id/content", handlers.V1.GetVideoContent)
+	// No-store image content proxy (auth-gated upstream URLs, e.g. chatgpt).
+	engine.GET("/v1/images/:id/content", handlers.V1.GetImageContent)
 
 	publicAdmin := engine.Group("/admin/api")
 	{

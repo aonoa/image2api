@@ -20,7 +20,7 @@ import (
 // anything else → workflow_gemini_image / gemini-3-pro-image-preview. imageSize
 // is the "1K"/"2K"/"4K" tier. teamID is the workspace id; if empty it's derived
 // from the token. refs may be empty (pure text-to-image).
-func (c *Client) GenerateImage(ctx context.Context, token, teamID, modelID, prompt, aspectRatio, imageSize string, refs [][]byte) ([]byte, map[string]any, error) {
+func (c *Client) GenerateImage(ctx context.Context, token, teamID, modelID, prompt, aspectRatio, imageSize string, refs [][]byte, downloadResult bool) ([]byte, map[string]any, error) {
 	token = strings.TrimSpace(strings.TrimPrefix(token, "Bearer "))
 	if token == "" {
 		return nil, nil, ErrAuth
@@ -86,15 +86,20 @@ func (c *Client) GenerateImage(ctx context.Context, token, teamID, modelID, prom
 	if err != nil {
 		return nil, nil, err
 	}
-	data, err := c.download(ctx, directClient, artifactURL)
-	if err != nil {
-		return nil, nil, err
-	}
 	meta := map[string]any{
 		"provider":  "runway",
 		"task_id":   taskID,
 		"team_id":   teamID,
 		"image_url": artifactURL,
+	}
+	// downloadResult=false (API-key url-only mode): return the upstream artifact
+	// URL without downloading the PNG.
+	if !downloadResult {
+		return nil, meta, nil
+	}
+	data, err := c.download(ctx, directClient, artifactURL)
+	if err != nil {
+		return nil, nil, err
 	}
 	return data, meta, nil
 }

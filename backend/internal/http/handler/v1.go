@@ -210,6 +210,25 @@ func (h *V1Handler) GetVideoContent(c *gin.Context) {
 	_, _ = io.Copy(c.Writer, body)
 }
 
+// GetImageContent — GET /v1/images/{id}/content. Streams a no-store image by
+// proxying its stored (possibly auth-gated) upstream URL. Never persisted.
+func (h *V1Handler) GetImageContent(c *gin.Context) {
+	principal, err := h.v1.Authenticate(c.Request.Context(), c.GetHeader("Authorization"))
+	if err != nil {
+		h.writeAuthError(c, err)
+		return
+	}
+	body, contentType, err := h.v1.OpenImageContent(c.Request.Context(), principal, c.Param("id"))
+	if err != nil {
+		h.writeV1Error(c, err, nil)
+		return
+	}
+	defer body.Close()
+	c.Header("Content-Type", contentType)
+	c.Status(http.StatusOK)
+	_, _ = io.Copy(c.Writer, body)
+}
+
 // readMultipartImages reads the given file fields and returns each as base64.
 func readMultipartImages(c *gin.Context, keys ...string) []string {
 	var out []string
